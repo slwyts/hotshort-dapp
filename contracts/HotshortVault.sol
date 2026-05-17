@@ -55,9 +55,10 @@ contract HotshortVault {
     );
     bytes32 private immutable _DOMAIN_SEPARATOR;
 
-    constructor(address _signer) {
+    constructor(address _owner, address _signer) {
+        if (_owner == address(0)) revert ZeroAddress();
         if (_signer == address(0)) revert ZeroAddress();
-        owner = msg.sender;
+        owner = _owner;
         signer = _signer;
 
         _DOMAIN_SEPARATOR = keccak256(
@@ -70,7 +71,7 @@ contract HotshortVault {
             )
         );
 
-        emit OwnershipTransferred(address(0), msg.sender);
+        emit OwnershipTransferred(address(0), _owner);
         emit SignerUpdated(address(0), _signer);
     }
 

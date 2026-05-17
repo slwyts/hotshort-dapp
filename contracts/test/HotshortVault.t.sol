@@ -20,7 +20,7 @@ contract HotshortVaultTest is Test {
 
     function setUp() public {
         signerAddr = vm.addr(signerPk);
-        vault = new HotshortVault(signerAddr);
+        vault = new HotshortVault(address(this), signerAddr);
 
         usdt = new MockERC20("Mock USDT", "USDT", 18);
         hs = new MockERC20("Mock HS", "HS", 18);
@@ -40,6 +40,21 @@ contract HotshortVaultTest is Test {
         vm.stopPrank();
 
         assertEq(usdt.balanceOf(address(vault)), 11_000 * ONE);
+    }
+
+    function test_ConstructorSetsExplicitOwner() public {
+        HotshortVault ownedByBob = new HotshortVault(bob, signerAddr);
+        assertEq(ownedByBob.owner(), bob);
+        assertEq(ownedByBob.signer(), signerAddr);
+
+        vm.prank(bob);
+        ownedByBob.setPaused(true);
+        assertTrue(ownedByBob.paused());
+    }
+
+    function test_ConstructorRejectsZeroOwner() public {
+        vm.expectRevert(HotshortVault.ZeroAddress.selector);
+        new HotshortVault(address(0), signerAddr);
     }
 
     function test_ClaimWithValidSignatureReleasesFunds() public {
