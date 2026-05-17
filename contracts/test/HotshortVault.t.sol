@@ -53,7 +53,7 @@ contract HotshortVaultTest is Test {
     }
 
     function test_ConstructorRejectsZeroOwner() public {
-        vm.expectRevert(HotshortVault.ZeroAddress.selector);
+        vm.expectRevert(abi.encodeWithSignature("OwnableInvalidOwner(address)", address(0)));
         new HotshortVault(address(0), signerAddr);
     }
 
@@ -135,15 +135,15 @@ contract HotshortVaultTest is Test {
 
     function test_AdminOnlyControls() public {
         vm.prank(alice);
-        vm.expectRevert(HotshortVault.NotOwner.selector);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
         vault.setSigner(bob);
 
         vm.prank(alice);
-        vm.expectRevert(HotshortVault.NotOwner.selector);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
         vault.setPaused(true);
 
         vm.prank(alice);
-        vm.expectRevert(HotshortVault.NotOwner.selector);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
         vault.withdrawTo(address(usdt), bob, 1);
 
         vault.setSigner(bob);
@@ -163,17 +163,17 @@ contract HotshortVaultTest is Test {
 
         vm.startPrank(alice);
         usdt.approve(address(vault), 1 * ONE);
-        vm.expectRevert(HotshortVault.Paused.selector);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
         vault.deposit(address(usdt), 1 * ONE, 1, bytes32(0));
 
-        vm.expectRevert(HotshortVault.Paused.selector);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
         vault.claim(address(usdt), recipients, amounts, nonce, deadline, 1, sig);
 
         hs.approve(address(vault), 2 * ONE);
-        vm.expectRevert(HotshortVault.Paused.selector);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
         vault.burnHS(address(hs), 1 * ONE, alice);
 
-        vm.expectRevert(HotshortVault.Paused.selector);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
         vault.swapHsToStock(address(hs), 1 * ONE);
         vm.stopPrank();
     }
