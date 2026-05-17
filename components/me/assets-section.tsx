@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { useAccount, useReadContract } from "wagmi";
 import { formatUnits } from "viem";
 import { Loader2 } from "lucide-react";
@@ -160,12 +161,7 @@ export function AssetsSection() {
               return (
                 <div key={tk.key} className="flex items-center justify-between py-2.5">
                   <div className="flex items-center gap-2.5">
-                    <div
-                      className="flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-black"
-                      style={{ background: `${tk.color}25`, color: tk.color }}
-                    >
-                      {tk.key.slice(0, 2)}
-                    </div>
+                    <TokenIcon token={tk.key} />
                     <div>
                       <div className="text-sm font-bold">{tk.key}</div>
                       <div className="text-[10px] text-white/40">{t(tk.descKey)}</div>
@@ -187,6 +183,51 @@ export function AssetsSection() {
       <p className="px-2 text-center text-[10px] text-white/30">
         {t("me.assets.note")}
       </p>
+    </div>
+  );
+}
+
+function TokenIcon({ token }: { token: (typeof TOKENS)[number]["key"] }) {
+  if (token === "HS") {
+    return (
+      <div className="relative h-8 w-8 overflow-hidden rounded-full border border-[#f7d56a]/50 bg-white shadow-[0_0_18px_rgba(184,41,255,0.28)]">
+        <Image src="/mascots/logo.png" alt="HS" fill sizes="32px" className="object-cover" />
+      </div>
+    );
+  }
+
+  if (token === "LP") {
+    return (
+      <div className="relative flex h-8 w-8 items-center justify-center rounded-full border border-cyan-300/35 bg-[#03141f] shadow-[0_0_18px_rgba(0,198,255,0.22)]">
+        <svg viewBox="0 0 32 32" aria-label="HS-USDT LP" className="h-8 w-8" role="img">
+          <defs>
+            <linearGradient id="lpHsGradient" x1="5" y1="5" x2="19" y2="21" gradientUnits="userSpaceOnUse">
+              <stop stopColor="#d83a87" />
+              <stop offset="1" stopColor="#00c6ff" />
+            </linearGradient>
+            <linearGradient id="lpRingGradient" x1="10" y1="8" x2="28" y2="26" gradientUnits="userSpaceOnUse">
+              <stop stopColor="#2bf7c4" />
+              <stop offset="1" stopColor="#00a3ff" />
+            </linearGradient>
+          </defs>
+          <circle cx="12.5" cy="13.5" r="9" fill="url(#lpHsGradient)" />
+          <circle cx="19.5" cy="18.5" r="9" fill="#26a17b" stroke="#bfffee" strokeWidth="1.4" />
+          <path d="M15.2 15.4h8.6v1.9h-3.2v1.2c2.2.1 3.8.4 3.8.9s-2.2 1-4.9 1-4.9-.5-4.9-1c0-.5 1.6-.8 3.8-.9v-1.2h-3.2v-1.9Zm3.2 3.8c-1.2.1-2 .2-2.3.3.5.2 1.7.3 3.4.3s2.9-.1 3.4-.3c-.3-.1-1.1-.2-2.3-.3v.6h-2.2v-.6Z" fill="white" />
+          <path d="M8.2 11.5c.8-1.7 2.5-2.9 4.5-2.9 1.6 0 3 .7 3.9 1.8" fill="none" stroke="#fff" strokeLinecap="round" strokeWidth="1.5" />
+          <path d="M16.9 7.7v3.2h-3.2" fill="none" stroke="#fff" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+          <path d="M23.9 22.1a8.6 8.6 0 0 1-11.9 0" fill="none" stroke="url(#lpRingGradient)" strokeLinecap="round" strokeWidth="1.6" />
+        </svg>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200/40 bg-[#26a17b] shadow-[0_0_18px_rgba(34,197,94,0.24)]">
+      <svg viewBox="0 0 32 32" aria-label="USDT" className="h-8 w-8" role="img">
+        <circle cx="16" cy="16" r="15" fill="#26A17B" />
+        <circle cx="16" cy="16" r="13" fill="none" stroke="#8ff5d2" strokeOpacity="0.35" strokeWidth="1" />
+        <path d="M8 8.3h16v3.2h-6.3v2.2c4.2.2 7.3.9 7.3 1.8 0 .9-3.1 1.6-7.3 1.8v6.4h-3.4v-6.4C10.1 17.1 7 16.4 7 15.5c0-.9 3.1-1.6 7.3-1.8v-2.2H8V8.3Zm6.3 6.9c-2.7.1-4.6.3-5.5.6.9.4 3.7.7 7.2.7s6.3-.3 7.2-.7c-.9-.3-2.8-.5-5.5-.6v1.1h-3.4v-1.1Z" fill="white" />
+      </svg>
     </div>
   );
 }

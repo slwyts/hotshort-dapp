@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
+import { QRCodeSVG } from "qrcode.react";
 import { Copy, Share2, QrCode } from "lucide-react";
 import Swal from "sweetalert2";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,7 +27,6 @@ export function InviteSection() {
   }
 
   const link = `${origin}/?ref=${address}`;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&bgcolor=050505&color=ffffff&margin=8&data=${encodeURIComponent(link)}`;
 
   const copy = async (text: string, msg: string) => {
     await navigator.clipboard.writeText(text);
@@ -60,8 +60,16 @@ export function InviteSection() {
       <Card>
         <CardContent className="flex flex-col items-center py-6">
           <div className="rounded-2xl border border-white/10 bg-white p-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={qrUrl} alt="invite qrcode" width={200} height={200} className="h-44 w-44" />
+            <QRCodeSVG
+              value={link}
+              title={t("me.invite.qrHint")}
+              size={200}
+              level="M"
+              bgColor="#050505"
+              fgColor="#ffffff"
+              marginSize={2}
+              className="h-44 w-44"
+            />
           </div>
           <div className="mt-4 text-center">
             <div className="flex items-center justify-center gap-2 text-xs text-white/40">
