@@ -1,0 +1,32 @@
+name = "hotshort-api"
+main = "src/index.ts"
+compatibility_date = "2025-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 与前端共用 D1 数据库
+[[d1_databases]]
+binding = "DB"
+database_name = "hotshort"
+database_id = "PLACEHOLDER_RUN_WRANGLER_D1_CREATE"
+migrations_dir = "migrations"
+
+[vars]
+CHAIN_ID = "56"
+RPC_URL = "https://bsc-dataseed.binance.org"
+VAULT_ADDRESS = "0x0000000000000000000000000000000000000000"
+HS_TOKEN = "0xcF4907621f0d9803c7288423B4303226b696B533"
+USDT_TOKEN = "0x55d398326f99059fF775485246999027B3197955"
+PANCAKE_PAIR = "0x2398e858Ac6Ad9DEa4496bC6ECacEa4Ce77cc67e"
+
+# 开发用本地变量见 .dev.vars（不入版本库）
+# Secrets 通过 `wrangler secret put SIGNER_PRIVATE_KEY / JWT_SECRET / BSCSCAN_API_KEY` 设置
+
+[triggers]
+crons = [
+  "*/1 * * * *",   # 每分钟：拉 Vault 事件 → D1
+  "0 0 * * *",     # 每日 UTC 00:00（北京时间 08:00）：股票分红结算
+  "0 16 * * 0",    # 每周日 UTC 16:00（北京时间周一 00:00）：彩票开奖 + 燃烧周榜结算
+]
+
+[observability]
+enabled = true

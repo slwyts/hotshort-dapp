@@ -1,0 +1,5 @@
+SIGNER_PRIVATE_KEY = "0x0000000000000000000000000000000000000000000000000000000000000001"
+JWT_SECRET = "dev-secret-change-me"
+# 可选：BscScan API key。仅 admin/genesis 页"链上扫描备选路径"按钮会用到；
+# 创世节点名单的主路径是 CSV 上传，不需要这个 key。
+BSCSCAN_API_KEY = ""

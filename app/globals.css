@@ -1,0 +1,123 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@font-face {
+  font-family: "Orbitron";
+  font-style: normal;
+  font-weight: 500 900;
+  font-display: swap;
+  src: url("/fonts/Orbitron.woff2") format("woff2");
+}
+
+@theme {
+  --color-background: #050505;
+  --color-foreground: #ffffff;
+  --color-panel: rgba(20, 20, 25, 0.6);
+  --color-brand: #b829ff;
+  --color-brand-accent: #00c6ff;
+  --color-brand-soft: rgba(184, 41, 255, 0.12);
+  --color-accent-soft: rgba(0, 198, 255, 0.12);
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-muted: rgba(255, 255, 255, 0.55);
+  --color-muted-foreground: rgba(255, 255, 255, 0.7);
+
+  --font-sans: "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-display: Orbitron, sans-serif;
+
+  --radius-sm: 0.375rem;
+  --radius: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.25rem;
+}
+
+@layer base {
+  html,
+  body {
+    background-color: #050505;
+    color: #ffffff;
+    overflow-x: hidden;
+    background-image: radial-gradient(
+        circle at 15% 50%,
+        rgba(184, 41, 255, 0.08) 0%,
+        transparent 50%
+      ),
+      radial-gradient(
+        circle at 85% 30%,
+        rgba(0, 198, 255, 0.08) 0%,
+        transparent 50%
+      );
+    background-attachment: fixed;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: rgba(184, 41, 255, 0.4);
+    color: #fff;
+  }
+
+  /* 自定义滚动条 */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #050505;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-brand);
+  }
+}
+
+@layer components {
+  .glass-panel {
+    background: rgba(20, 20, 25, 0.4);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  }
+
+  .neon-text {
+    background: linear-gradient(to right, #00c6ff, #b829ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: 0 0 20px rgba(184, 41, 255, 0.3);
+  }
+
+  .skeleton {
+    background: linear-gradient(90deg, #1f1f23 25%, #2a2a30 50%, #1f1f23 75%);
+    background-size: 200% 100%;
+    animation: hs-skeleton 1.5s infinite;
+    border-radius: 4px;
+    color: transparent !important;
+  }
+}
+
+@keyframes hs-skeleton {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes hs-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-18px);
+  }
+}
+
+.animate-float {
+  animation: hs-float 5s ease-in-out infinite;
+}

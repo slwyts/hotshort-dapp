@@ -1,0 +1,24 @@
+{
+  "name": "hotshort-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "db:migrate": "wrangler d1 migrations apply hotshort --local",
+    "db:migrate:prod": "wrangler d1 migrations apply hotshort --remote",
+    "db:exec": "wrangler d1 execute hotshort --local",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "viem": "^2.47.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251029.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^3.91.0"
+  }
+}
