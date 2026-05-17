@@ -37,7 +37,7 @@ oracle.get("/hs-price", async (c) => {
     return c.json({ priceUsdt: cache.price, cached: true });
   }
   const client = createPublicClient({ transport: http(c.env.RPC_URL) });
-  const pair = c.env.PANCAKE_PAIR as `0x${string}`;
+  const pair = c.env.PANCAKE_PAIR.toLowerCase() as `0x${string}`;
   const hs = c.env.HS_TOKEN.toLowerCase();
   const [token0, reserves] = await Promise.all([
     client.readContract({ address: pair, abi: PAIR_ABI, functionName: "token0" }),

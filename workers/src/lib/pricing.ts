@@ -67,7 +67,7 @@ export function tokenForStakeAsset(env: Env, asset: StakeAsset): Address {
 
 export async function lpWeiToUsdtWei(env: Env, lpWei: bigint): Promise<bigint> {
   if (lpWei <= 0n) return 0n;
-  const pair = env.PANCAKE_PAIR as Address;
+  const pair = env.PANCAKE_PAIR.toLowerCase() as Address;
   if (!/^0x[a-fA-F0-9]{40}$/.test(pair)) return 0n;
 
   const client = createPublicClient({ transport: http(env.RPC_URL) });

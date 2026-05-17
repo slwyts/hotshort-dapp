@@ -32,7 +32,6 @@ const RESET_TABLES = [
   "burn_top10_settlements",
   "burn_personal_status",
   "burn_rounds",
-  "burn_weekly_pool",
   "burn_records",
   "airdrop_list",
   "genesis_nodes",
@@ -92,6 +91,19 @@ testControl.post("/time/advance", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { seconds?: number };
   if (!Number.isFinite(body.seconds)) return c.json({ error: "bad seconds" }, 400);
   return c.json({ nowSeconds: await advanceTestNowSeconds(c.env, body.seconds!) });
+});
+
+testControl.post("/config", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { key?: string; value?: string };
+  if (!body.key || !/^[a-zA-Z0-9_:.\-]+$/.test(body.key)) return c.json({ error: "bad key" }, 400);
+  if (typeof body.value !== "string") return c.json({ error: "bad value" }, 400);
+  const now = await nowSeconds(c.env);
+  await c.env.DB.prepare(
+    "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES (?, ?, '__test', ?)",
+  )
+    .bind(body.key, body.value, now)
+    .run();
+  return c.json({ key: body.key, value: body.value });
 });
 
 testControl.post("/lottery/winning", async (c) => {

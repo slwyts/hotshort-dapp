@@ -1,15 +1,17 @@
+-- HotShort D1 schema - consolidated pre-deploy baseline.
+-- This project has not been deployed yet, so historical staged migrations were squashed into one init file.
 
 -- 用户基础信息（首次连接钱包时 upsert）
 CREATE TABLE IF NOT EXISTS users (
-  address TEXT PRIMARY KEY,                  -- lower-case
+  address TEXT PRIMARY KEY,
   referrer TEXT,
   level INTEGER NOT NULL DEFAULT 0,
-  joined_at INTEGER NOT NULL,                -- unix seconds
+  joined_at INTEGER NOT NULL,
   last_active_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_users_referrer ON users(referrer);
 
--- 推荐路径（写入 referrer 时一次性回填三代）
+-- 推荐路径（三代上级快照）
 CREATE TABLE IF NOT EXISTS referral_paths (
   user TEXT PRIMARY KEY,
   level1 TEXT,
@@ -20,21 +22,22 @@ CREATE TABLE IF NOT EXISTS referral_paths (
 
 -- 质押订单
 CREATE TABLE IF NOT EXISTS stake_orders (
-  id TEXT PRIMARY KEY,                       -- ulid
+  id TEXT PRIMARY KEY,
   user TEXT NOT NULL,
-  asset TEXT NOT NULL,                       -- 'USDT' | 'HS' | 'LP'
-  amount TEXT NOT NULL,                      -- decimal string (wei)
-  lock_months INTEGER NOT NULL,              -- 1 / 3 / 6 / 12
-  monthly_rate_bps INTEGER NOT NULL,         -- 50 = 0.5%；快照
+  asset TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  lock_months INTEGER NOT NULL,
+  monthly_rate_bps INTEGER NOT NULL,
   started_at INTEGER NOT NULL,
   matures_at INTEGER NOT NULL,
-  claimed INTEGER NOT NULL DEFAULT 0,        -- 0/1
+  claimed INTEGER NOT NULL DEFAULT 0,
   claim_tx_hash TEXT,
   source_tx_hash TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_stake_user ON stake_orders(user, claimed);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stake_source_tx ON stake_orders(source_tx_hash);
 
--- 当前生效的利率（后台可改；新订单读最新）
+-- 当前生效的质押利率
 CREATE TABLE IF NOT EXISTS stake_rates (
   asset TEXT NOT NULL,
   lock_months INTEGER NOT NULL,
@@ -43,29 +46,55 @@ CREATE TABLE IF NOT EXISTS stake_rates (
   PRIMARY KEY (asset, lock_months)
 );
 
--- AI 量化套餐订单
+-- AI 套餐订单
 CREATE TABLE IF NOT EXISTS ai_orders (
   id TEXT PRIMARY KEY,
   user TEXT NOT NULL,
-  tier TEXT NOT NULL,                        -- 'genesis' | 'glory' | 'eternal' | 'shine' | 'pioneer'
+  tier TEXT NOT NULL,
   usdt_in TEXT NOT NULL,
-  stock_granted TEXT NOT NULL,               -- 立即到账股票数
+  stock_granted TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   source_tx_hash TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_user ON ai_orders(user);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_source_tx ON ai_orders(source_tx_hash);
+
+-- 股票持仓总账
+CREATE TABLE IF NOT EXISTS stock_holdings (
+  user TEXT PRIMARY KEY,
+  total_stock TEXT NOT NULL DEFAULT '0',
+  locked_stock TEXT NOT NULL DEFAULT '0',
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stock_holdings_total ON stock_holdings(total_stock);
+
+-- HS -> 股票闪兑锁仓订单
+CREATE TABLE IF NOT EXISTS stock_swap_locks (
+  id TEXT PRIMARY KEY,
+  user TEXT NOT NULL,
+  hs_in TEXT NOT NULL,
+  stock_locked TEXT NOT NULL,
+  hs_price_usdt TEXT NOT NULL,
+  stock_price_usdt TEXT NOT NULL,
+  swapped_at INTEGER NOT NULL,
+  unlocks_at INTEGER NOT NULL,
+  unlocked INTEGER NOT NULL DEFAULT 0,
+  source_tx_hash TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_swap_user ON stock_swap_locks(user, unlocked);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_swap_source_tx ON stock_swap_locks(source_tx_hash);
 
 -- 每日股票分红池快照
 CREATE TABLE IF NOT EXISTS ai_dividend_pool_daily (
-  date TEXT PRIMARY KEY,                     -- yyyy-mm-dd UTC+8
-  target_volume TEXT NOT NULL,               -- 后台配置区间内随机的当日交易额
-  ratio_bps INTEGER NOT NULL,                -- 分红比例（基点）
+  date TEXT PRIMARY KEY,
+  target_volume TEXT NOT NULL,
+  ratio_bps INTEGER NOT NULL,
   total_pool_stock TEXT NOT NULL,
   hs_price_snapshot TEXT NOT NULL,
   settled INTEGER NOT NULL DEFAULT 0
 );
 
--- 每日用户分到的股票
+-- 每日用户股票分红
 CREATE TABLE IF NOT EXISTS ai_dividend_user_daily (
   date TEXT NOT NULL,
   user TEXT NOT NULL,
@@ -76,17 +105,37 @@ CREATE TABLE IF NOT EXISTS ai_dividend_user_daily (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_div_user ON ai_dividend_user_daily(user, claimed);
 
+-- 推荐返佣：AI 直推、股票三代、燃烧推广
+CREATE TABLE IF NOT EXISTS referral_rewards (
+  id TEXT PRIMARY KEY,
+  user TEXT NOT NULL,
+  source_user TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  reward_token TEXT NOT NULL,
+  reward_amount TEXT NOT NULL,
+  basis_amount TEXT,
+  basis_kind TEXT,
+  source_ref TEXT,
+  earned_at INTEGER NOT NULL,
+  claimed INTEGER NOT NULL DEFAULT 0,
+  claim_signature_nonce TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_referral_user ON referral_rewards(user, claimed);
+CREATE INDEX IF NOT EXISTS idx_referral_source ON referral_rewards(source_user);
+
 -- 彩票期次
 CREATE TABLE IF NOT EXISTS lottery_rounds (
   round_no INTEGER PRIMARY KEY,
   ticket_price_hs TEXT NOT NULL,
-  pool_hs TEXT NOT NULL,                     -- 当前奖池（含每周 10 万 HS 补给）
+  pool_hs TEXT NOT NULL,
   opened_at INTEGER NOT NULL,
   drawn_at INTEGER,
-  winning_number TEXT,                       -- 6 位数字字符串
-  commit_hash TEXT,                          -- 上周提前 commit 的 hash
-  reveal_seed TEXT,                          -- 本周开奖时 reveal
-  block_hash TEXT                            -- 配合 future block 哈希，模拟薄饼公平性
+  winning_number TEXT,
+  commit_hash TEXT,
+  reveal_seed TEXT,
+  block_hash TEXT,
+  pancake_lottery_id TEXT,
+  draw_source TEXT
 );
 
 -- 彩票门票
@@ -94,7 +143,7 @@ CREATE TABLE IF NOT EXISTS lottery_tickets (
   id TEXT PRIMARY KEY,
   round_no INTEGER NOT NULL,
   user TEXT NOT NULL,
-  numbers TEXT NOT NULL,                     -- 6 位数字字符串
+  numbers TEXT NOT NULL,
   paid_hs TEXT NOT NULL,
   hit_digits INTEGER,
   prize_hs TEXT,
@@ -105,7 +154,16 @@ CREATE TABLE IF NOT EXISTS lottery_tickets (
 CREATE INDEX IF NOT EXISTS idx_lottery_user ON lottery_tickets(user, round_no);
 CREATE INDEX IF NOT EXISTS idx_lottery_round ON lottery_tickets(round_no);
 
--- 燃烧记账（用户每笔燃烧）
+-- 彩票 commit/reveal 预留
+CREATE TABLE IF NOT EXISTS lottery_commits (
+  round_no INTEGER PRIMARY KEY,
+  commit_hash TEXT NOT NULL,
+  reveal_seed TEXT,
+  committed_at INTEGER NOT NULL,
+  revealed_at INTEGER
+);
+
+-- 燃烧记录
 CREATE TABLE IF NOT EXISTS burn_records (
   id TEXT PRIMARY KEY,
   user TEXT NOT NULL,
@@ -117,36 +175,85 @@ CREATE TABLE IF NOT EXISTS burn_records (
   source_tx_hash TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_burn_user ON burn_records(user, claimed_individual);
+CREATE INDEX IF NOT EXISTS idx_burn_records_round ON burn_records(settled_round);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_burn_source_tx ON burn_records(source_tx_hash);
 
--- 燃烧周榜
-CREATE TABLE IF NOT EXISTS burn_weekly_pool (
+-- 燃烧周结算汇总
+CREATE TABLE IF NOT EXISTS burn_rounds (
   round INTEGER PRIMARY KEY,
-  total_pool TEXT NOT NULL,                  -- 当周总池（含上周 40% 滚入）
-  top10_carryover TEXT NOT NULL DEFAULT '0',
-  settled_at INTEGER
+  opened_at INTEGER NOT NULL,
+  closed_at INTEGER,
+  total_burn_hs TEXT NOT NULL DEFAULT '0',
+  weight_pool_hs TEXT NOT NULL DEFAULT '0',
+  promotion_pool_hs TEXT NOT NULL DEFAULT '0',
+  stake_pool_hs TEXT NOT NULL DEFAULT '0',
+  ai_pool_hs TEXT NOT NULL DEFAULT '0',
+  top10_pool_hs TEXT NOT NULL DEFAULT '0',
+  black_hole_hs TEXT NOT NULL DEFAULT '0',
+  top10_carryover_hs TEXT NOT NULL DEFAULT '0',
+  settled INTEGER NOT NULL DEFAULT 0
 );
+
+-- 个人燃烧状态
+CREATE TABLE IF NOT EXISTS burn_personal_status (
+  user TEXT PRIMARY KEY,
+  total_burned_hs TEXT NOT NULL DEFAULT '0',
+  total_personal_claimed_hs TEXT NOT NULL DEFAULT '0',
+  out_at INTEGER,
+  updated_at INTEGER NOT NULL
+);
+
+-- 燃烧 Top10 周榜结算明细
+CREATE TABLE IF NOT EXISTS burn_top10_settlements (
+  id TEXT PRIMARY KEY,
+  round INTEGER NOT NULL,
+  user TEXT NOT NULL,
+  rank INTEGER NOT NULL,
+  burn_hs TEXT NOT NULL,
+  reward_hs TEXT NOT NULL,
+  claimed INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_burn_top10_user ON burn_top10_settlements(user, claimed);
+CREATE INDEX IF NOT EXISTS idx_burn_top10_round ON burn_top10_settlements(round);
+
+-- 跨模块奖励待领账本：燃烧权重、质押燃烧分红、AI 燃烧分红等
+CREATE TABLE IF NOT EXISTS reward_claims (
+  id TEXT PRIMARY KEY,
+  user TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  reward_token TEXT NOT NULL,
+  reward_amount TEXT NOT NULL,
+  round INTEGER,
+  source_ref TEXT NOT NULL,
+  claimed INTEGER NOT NULL DEFAULT 0,
+  claim_signature_nonce TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE(user, kind, source_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_reward_claims_user ON reward_claims(user, claimed);
+CREATE INDEX IF NOT EXISTS idx_reward_claims_round ON reward_claims(round, kind);
 
 -- 创世节点名单（CSV 导入 / 链上扫描）
 CREATE TABLE IF NOT EXISTS genesis_nodes (
   address TEXT PRIMARY KEY,
-  tier TEXT NOT NULL,                        -- 与 genesis-hotshort 5 档对齐
-  source TEXT NOT NULL,                      -- 'csv' | 'onchain-scan'
+  tier TEXT NOT NULL,
+  source TEXT NOT NULL,
   imported_at INTEGER NOT NULL,
-  imported_by TEXT NOT NULL                  -- admin 钱包
+  imported_by TEXT NOT NULL
 );
 
--- 燃烧 1000U 以上的 hotshort 账户空投表单
+-- 燃烧 1000U 以上 hotshort 账户空投表单
 CREATE TABLE IF NOT EXISTS airdrop_list (
   id TEXT PRIMARY KEY,
   user TEXT NOT NULL,
   hotshort_account TEXT NOT NULL,
   burn_total TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',    -- pending | sent | rejected
+  status TEXT NOT NULL DEFAULT 'pending',
   submitted_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_airdrop_user ON airdrop_list(user);
 
--- 后台可改配置（key-value）
+-- 后台配置
 CREATE TABLE IF NOT EXISTS admin_config (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
@@ -163,7 +270,20 @@ CREATE TABLE IF NOT EXISTS claim_signatures (
   reason INTEGER NOT NULL,
   deadline INTEGER NOT NULL,
   signature TEXT NOT NULL,
-  used_at INTEGER,                           -- 链上消费后回填
+  used_at INTEGER,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_claim_user ON claim_signatures(user, used_at);
+
+-- 默认后台配置
+INSERT OR IGNORE INTO admin_config (key, value, updated_by, updated_at) VALUES
+  ('stock_price_usdt', '1', 'init', strftime('%s','now')),
+  ('stock_volume_min_usdt', '100000', 'init', strftime('%s','now')),
+  ('stock_volume_max_usdt', '200000', 'init', strftime('%s','now')),
+  ('stock_dividend_ratio_bps', '100', 'init', strftime('%s','now')),
+  ('hs_price_snapshot', '0.001', 'init', strftime('%s','now')),
+  ('lottery_ticket_price_usdt', '1', 'init', strftime('%s','now')),
+  ('lottery_weekly_refill_hs', '100000', 'init', strftime('%s','now')),
+  ('lottery_current_round', '1', 'init', strftime('%s','now')),
+  ('burn_current_round', '1', 'init', strftime('%s','now')),
+  ('pancake_lottery_address', '', 'init', strftime('%s','now'));

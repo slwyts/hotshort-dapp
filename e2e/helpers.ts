@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createPublicClient, createWalletClient, defineChain, encodeAbiParameters, http, keccak256, parseEther, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { ERC20_ABI, VAULT_ABI } from "../lib/contracts/abis";
-import { ANVIL_CHAIN_ID, ANVIL_RPC, HS_TOKEN, USDT_TOKEN } from "./constants";
+import { ANVIL_CHAIN_ID, ANVIL_RPC, HS_TOKEN, PANCAKE_PAIR, USDT_TOKEN } from "./constants";
 
 export const WORKER_URL = process.env.WORKER_URL ?? "http://localhost:8787";
 
@@ -108,21 +108,28 @@ function storageValue(value: bigint): Hex {
 }
 
 export async function setTokenBalance(token: Address, holder: Address, balance: bigint, balanceSlot: bigint): Promise<void> {
-  await rpcCall("anvil_setStorageAt", [token, storageSlot(holder, balanceSlot), storageValue(balance)]);
+  await rpcCall("anvil_setStorageAt", [token.toLowerCase(), storageSlot(holder, balanceSlot), storageValue(balance)]);
+}
+
+export async function fundLifecycleAccount(user: Address, vault: Address): Promise<void> {
+  await rpcCall("anvil_setBalance", [user, "0x56BC75E2D63100000"]);
+  await setTokenBalance(USDT_TOKEN as Address, user, parseEther("1000000"), 1n);
+  await setTokenBalance(HS_TOKEN as Address, user, parseEther("100000000"), 0n);
+  await setTokenBalance(PANCAKE_PAIR as Address, user, parseEther("1000"), 1n);
+  await setTokenBalance(HS_TOKEN as Address, vault, parseEther("1000000000000"), 0n);
+  await setTokenBalance(USDT_TOKEN as Address, vault, parseEther("1000000000"), 1n);
 }
 
 export async function fundStakeLifecycleAccount(user: Address, vault: Address): Promise<void> {
-  await rpcCall("anvil_setBalance", [user, "0x56BC75E2D63100000"]);
-  await setTokenBalance(USDT_TOKEN as Address, user, parseEther("10000"), 1n);
-  await setTokenBalance(HS_TOKEN as Address, user, parseEther("10000"), 0n);
-  await setTokenBalance(HS_TOKEN as Address, vault, parseEther("1000000"), 0n);
+  await fundLifecycleAccount(user, vault);
 }
 
 export async function depositToVault(accountInfo: TestAccount, token: Address, amount: bigint, purpose: number): Promise<Hex> {
   const vault = getVaultAddress();
+  const normalizedToken = token.toLowerCase() as Address;
   const { walletClient } = accountClient(accountInfo);
   const approveHash = await walletClient.writeContract({
-    address: token,
+    address: normalizedToken,
     abi: ERC20_ABI,
     functionName: "approve",
     args: [vault, amount],
@@ -132,8 +139,81 @@ export async function depositToVault(accountInfo: TestAccount, token: Address, a
     address: vault,
     abi: VAULT_ABI,
     functionName: "deposit",
-    args: [token, amount, purpose, "0x0000000000000000000000000000000000000000000000000000000000000000"],
+    args: [normalizedToken, amount, purpose, "0x0000000000000000000000000000000000000000000000000000000000000000"],
   });
   await publicClient.waitForTransactionReceipt({ hash: depositHash });
   return depositHash;
+}
+
+export async function burnHsToVault(accountInfo: TestAccount, amount: bigint, referrer?: Address): Promise<Hex> {
+  const vault = getVaultAddress();
+  const hsToken = HS_TOKEN.toLowerCase() as Address;
+  const { walletClient } = accountClient(accountInfo);
+  const approveHash = await walletClient.writeContract({
+    address: hsToken,
+    abi: ERC20_ABI,
+    functionName: "approve",
+    args: [vault, amount],
+  });
+  await publicClient.waitForTransactionReceipt({ hash: approveHash });
+  const burnHash = await walletClient.writeContract({
+    address: vault,
+    abi: VAULT_ABI,
+    functionName: "burnHS",
+    args: [hsToken, amount, referrer ?? "0x0000000000000000000000000000000000000000"],
+  });
+  await publicClient.waitForTransactionReceipt({ hash: burnHash });
+  return burnHash;
+}
+
+export type VaultClaim = {
+  token: Address;
+  recipients: Address[];
+  amounts: string[];
+  nonce: string;
+  deadline: number;
+  reason: number;
+  signature: Hex;
+};
+
+export async function claimFromVault(accountInfo: TestAccount, claim: VaultClaim): Promise<Hex> {
+  const vault = getVaultAddress();
+  const { walletClient } = accountClient(accountInfo);
+  const claimHash = await walletClient.writeContract({
+    address: vault,
+    abi: VAULT_ABI,
+    functionName: "claim",
+    args: [
+      claim.token,
+      claim.recipients,
+      claim.amounts.map((amount) => BigInt(amount)),
+      BigInt(claim.nonce),
+      BigInt(claim.deadline),
+      claim.reason,
+      claim.signature,
+    ],
+  });
+  await publicClient.waitForTransactionReceipt({ hash: claimHash });
+  return claimHash;
+}
+
+export async function runTestCron<T>(job: string): Promise<{ job: string; result: T }> {
+  return apiRequest<{ job: string; result: T }>("/__test/cron", {
+    method: "POST",
+    body: JSON.stringify({ job }),
+  });
+}
+
+export async function setTestLotteryWinning(winning: string | null): Promise<void> {
+  await apiRequest("/__test/lottery/winning", {
+    method: "POST",
+    body: JSON.stringify({ winning }),
+  });
+}
+
+export async function setTestConfig(key: string, value: string): Promise<void> {
+  await apiRequest("/__test/config", {
+    method: "POST",
+    body: JSON.stringify({ key, value }),
+  });
 }

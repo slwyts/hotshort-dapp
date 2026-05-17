@@ -47,6 +47,6 @@ export const ANVIL_CHAIN_ID = 31337;
 export const BSC_FORK_URL = "https://bsc-dataseed.binance.org";
 
 // BSC 主网真实地址（anvil fork 后可用）
-export const HS_TOKEN = "0xcF4907621f0d9803c7288423B4303226b696B533";
-export const USDT_TOKEN = "0x55d398326f99059fF775485246999027B3197955";
-export const PANCAKE_PAIR = "0x2398E858ac6aD9deA4496Bc6ecacea4cE77cc67E";
+export const HS_TOKEN = "0xcf4907621f0d9803c7288423b4303226b696b533";
+export const USDT_TOKEN = "0x55d398326f99059ff775485246999027b3197955";
+export const PANCAKE_PAIR = "0x2398e858ac6ad9dea4496bc6ecacea4ce77cc67e";

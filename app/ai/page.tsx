@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useState } from "react";
 import { useAccount, useReadContract, useWriteContract } from "wagmi";
 import { formatUnits, keccak256, parseUnits, toHex } from "viem";
-import { Loader2, Lock } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import Swal from "sweetalert2";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -213,7 +213,7 @@ export default function AiPage() {
                   ) : !isConnected ? (
                     t("ai.connect")
                   ) : !eligible ? (
-                    <Lock className="h-3 w-3" />
+                    t("ai.insufficient")
                   ) : (
                     t("ai.buy")
                   )}

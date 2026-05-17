@@ -1,9 +1,8 @@
 import type { Env } from "../env";
-import { type Address } from "viem";
 
 const BSC_API_URL = "https://api.bscscan.com/api";
-const USDT = "0x55d398326f99059fF775485246999027B3197955".toLowerCase();
-const RECEIVER = "0x6800981C52DD2379fE3c3a16f6B07594Eb32bC55".toLowerCase();
+const USDT = "0x55d398326f99059ff775485246999027b3197955";
+const RECEIVER = "0x6800981c52dd2379fe3c3a16f6b07594eb32bc55";
 
 /** 5 档套餐金额（USDT 全价 / 7 折预售价），任意命中即识别 */
 const TIER_AMOUNTS: Record<string, number[]> = {
