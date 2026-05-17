@@ -1,19 +1,25 @@
 "use client";
 
-import { useAccount } from "wagmi";
-import { Shield } from "lucide-react";
-import { OWNER_ADDRESSES } from "@/lib/contracts/addresses";
+import { useAccount, useReadContract } from "wagmi";
+import { Shield, Loader2 } from "lucide-react";
+import { HOTSHORT_VAULT } from "@/lib/contracts/addresses";
+import { VAULT_ABI } from "@/lib/contracts/abis";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConnectButton } from "@/components/connect-button";
 
-/**
- * Admin 路由守卫：仅 NEXT_PUBLIC_OWNER_ADDRESSES 中列出的钱包可见。
- * 后端 admin/* 接口另有 SIWE + admin_config.owner_addresses 双重校验。
- */
 export function AdminGuard({ children }: { children: React.ReactNode }) {
   const { address, isConnected } = useAccount();
-  const lower = address?.toLowerCase();
-  const allowed = !!lower && (OWNER_ADDRESSES.length === 0 || OWNER_ADDRESSES.includes(lower));
+  const { data: onchainOwner, isLoading } = useReadContract({
+    abi: VAULT_ABI,
+    address: HOTSHORT_VAULT,
+    functionName: "owner",
+    query: { enabled: isConnected },
+  });
+
+  const allowed =
+    !!address &&
+    !!onchainOwner &&
+    address.toLowerCase() === (onchainOwner as string).toLowerCase();
 
   if (!isConnected) {
     return (
@@ -30,6 +36,19 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (isLoading) {
+    return (
+      <div className="container mx-auto px-4 py-20">
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-white/40" />
+            <p className="text-sm text-white/50">校验 owner 中…</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (!allowed) {
     return (
       <div className="container mx-auto px-4 py-20">
@@ -37,7 +56,7 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
           <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
             <Shield className="h-10 w-10 text-red-400" />
             <p className="text-lg font-bold">无权访问</p>
-            <p className="text-sm text-white/50">当前钱包不在 owner 白名单</p>
+            <p className="text-sm text-white/50">当前钱包不是合约 owner</p>
           </CardContent>
         </Card>
       </div>

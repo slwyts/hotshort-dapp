@@ -15,12 +15,6 @@ export const HOTSHORT_VAULT =
   (process.env.NEXT_PUBLIC_VAULT_ADDRESS?.toLowerCase() as `0x${string}` | undefined) ??
   ("0x0000000000000000000000000000000000000000" as const);
 
-/** 后台白名单（owner 钱包地址，逗号分隔） */
-export const OWNER_ADDRESSES = (process.env.NEXT_PUBLIC_OWNER_ADDRESSES || "")
-  .split(",")
-  .map((s) => s.trim().toLowerCase())
-  .filter(Boolean);
-
 /** 业务用途枚举（与合约 Deposited.purpose 对齐） */
 export const DEPOSIT_PURPOSE = {
   STAKE: 1,

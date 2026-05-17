@@ -4,6 +4,7 @@ import type { Env } from "../env";
 import { requireUser } from "./auth";
 import { invalidateRate } from "../lib/rates";
 import { scanGenesisTransfers } from "../lib/genesis-scan";
+import { readVaultOwner } from "../lib/vault-owner";
 import {
   STAKE_ASSETS,
   STAKE_LOCK_MONTHS,
@@ -16,18 +17,12 @@ export const admin = new Hono<{ Bindings: Env }>();
 async function requireOwner(c: Context<{ Bindings: Env }>): Promise<string | null> {
   const user = await requireUser(c);
   if (!user) return null;
-  const row = await c.env.DB.prepare(
-    "SELECT value FROM admin_config WHERE key = 'owner_addresses'",
-  ).first<{ value: string }>();
-  if (!row) {
-    // 部署初期允许配置为空时退回 wrangler vars OWNER 列表
+  try {
+    const onchainOwner = await readVaultOwner(c.env);
+    return user === onchainOwner ? user : null;
+  } catch {
     return null;
   }
-  const owners = row.value
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  return owners.includes(user) ? user : null;
 }
 
 admin.get("/whoami", async (c) => {
@@ -289,33 +284,6 @@ admin.get("/agents", async (c) => {
   return c.json({ agents: rs.results ?? [] });
 });
 admin.post("/owners", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as {
-    addresses?: string[];
-    bootstrapToken?: string;
-  };
-  // 引导：当 admin_config.owner_addresses 不存在时，允许用 BOOTSTRAP_TOKEN 一次性设置
-  const existing = await c.env.DB.prepare(
-    "SELECT 1 FROM admin_config WHERE key = 'owner_addresses'",
-  ).first();
-  if (existing) {
-    const owner = await requireOwner(c);
-    if (!owner) return c.json({ error: "forbidden" }, 403);
-  } else {
-    if (!body.bootstrapToken || body.bootstrapToken !== c.env.JWT_SECRET) {
-      return c.json({ error: "bootstrap forbidden" }, 403);
-    }
-  }
-  if (!Array.isArray(body.addresses) || body.addresses.length === 0) {
-    return c.json({ error: "bad payload" }, 400);
-  }
-  const value = body.addresses
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => /^0x[a-f0-9]{40}$/.test(s))
-    .join(",");
-  await c.env.DB.prepare(
-    "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('owner_addresses', ?, 'admin', ?)",
-  )
-    .bind(value, Math.floor(Date.now() / 1000))
-    .run();
-  return c.json({ owners: value.split(",") });
+  // owner 现在直接从链上 Vault 合约读取，无需后台维护白名单
+  return c.json({ error: "deprecated: owner is read from Vault.owner() on-chain" }, 410);
 });

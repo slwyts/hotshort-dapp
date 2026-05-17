@@ -31,9 +31,9 @@ yarn-error.log*
 .env
 .env.local
 .env.development
-.env.production
 .env.secret
 .env.hardhat
+.env.key
 
 # typescript
 *.tsbuildinfo

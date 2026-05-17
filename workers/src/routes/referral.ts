@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
+import { upsertUser } from "../lib/users";
 
 export const referral = new Hono<{ Bindings: Env }>();
 
@@ -79,4 +80,39 @@ referral.get("/me", async (c) => {
     referrer: u?.referrer ?? null,
     ancestors: me ?? { level1: null, level2: null, level3: null },
   });
+});
+
+/**
+ * POST /referral/bind  { referrer }
+ * 用户登录后手动绑定上级。规则：
+ *   - referrer 必须是合法地址，且不能等于自己
+ *   - 一旦绑定成功，不能再修改（防止洗榜）
+ *   - 不允许形成环（referrer 的祖先链中不能出现自己）
+ */
+referral.post("/bind", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  const body = (await c.req.json().catch(() => ({}))) as { referrer?: string };
+  const ref = (body.referrer ?? "").trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(ref)) return c.json({ error: "invalid referrer" }, 400);
+  if (ref === user) return c.json({ error: "cannot refer self" }, 400);
+
+  const existing = await c.env.DB.prepare("SELECT referrer FROM users WHERE address = ?")
+    .bind(user)
+    .first<{ referrer: string | null }>();
+  if (existing?.referrer) return c.json({ error: "already bound", referrer: existing.referrer }, 409);
+
+  // 环检测：沿 ref 的上级链查 6 跳，遇到 self 拒绝
+  let cursor = ref;
+  for (let i = 0; i < 6; i++) {
+    const r = await c.env.DB.prepare("SELECT referrer FROM users WHERE address = ?")
+      .bind(cursor)
+      .first<{ referrer: string | null }>();
+    if (!r?.referrer) break;
+    if (r.referrer === user) return c.json({ error: "circular referral" }, 400);
+    cursor = r.referrer;
+  }
+
+  await upsertUser(c.env, user, ref);
+  return c.json({ ok: true, referrer: ref });
 });

@@ -18,8 +18,8 @@ import {
 } from "@/lib/constants/business-rules";
 
 async function ownerAddress(env: Env): Promise<string> {
-  const row = await env.DB.prepare("SELECT value FROM admin_config WHERE key = 'owner_addresses'").first<{ value: string }>();
-  return (row?.value.split(",")[0]?.trim() || "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266").toLowerCase();
+  const { readVaultOwner } = await import("./vault-owner");
+  return readVaultOwner(env);
 }
 
 async function isBurnPromotionActive(env: Env, user: string, minBurnHs: bigint): Promise<boolean> {

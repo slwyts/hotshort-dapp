@@ -187,10 +187,9 @@ lottery.post("/claim", async (c) => {
 lottery.post("/admin/draw", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
-  const ownerRow = await c.env.DB.prepare("SELECT value FROM admin_config WHERE key = 'owner_addresses'").first<{ value: string }>();
-  if (!ownerRow || !ownerRow.value.toLowerCase().split(",").map((s) => s.trim()).includes(user)) {
-    return c.json({ error: "forbidden" }, 403);
-  }
+  const { readVaultOwner } = await import("../lib/vault-owner");
+  const owner = await readVaultOwner(c.env).catch(() => null);
+  if (!owner || owner !== user) return c.json({ error: "forbidden" }, 403);
   const { drawLottery } = await import("../lib/lottery-draw");
   const r = await drawLottery(c.env);
   return c.json(r);

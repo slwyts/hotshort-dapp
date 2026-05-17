@@ -12,6 +12,7 @@ import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI } from "@/lib/contracts/abis";
 import { HS_TOKEN, USDT_TOKEN, PANCAKE_PAIR_HS_USDT } from "@/lib/contracts/addresses";
 import { formatNumber } from "@/lib/utils";
+import { ReferrerBindCard } from "@/components/me/referrer-bind-card";
 
 interface Portfolio {
   stakeUsdt: string;
@@ -109,6 +110,8 @@ export function AssetsSection() {
 
   return (
     <div className="space-y-3">
+      <ReferrerBindCard />
+
       {/* DApp 总资产 */}
       <Card>
         <CardContent className="py-4 text-center">

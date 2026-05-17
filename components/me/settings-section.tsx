@@ -8,7 +8,6 @@ import {
   Info,
   ChevronRight,
 } from "lucide-react";
-import Swal from "sweetalert2";
 import { Card, CardContent } from "@/components/ui/card";
 import { useLocale } from "@/components/locale-provider";
 
@@ -19,25 +18,8 @@ export function SettingsSection() {
   const { disconnect } = useDisconnect();
   const { locale, setLocale, t } = useLocale();
 
-  const switchLang = async () => {
-    const result = await Swal.fire({
-      title: t("me.settings.language"),
-      input: "radio",
-      inputOptions: {
-        zh: t("me.settings.lang.zh"),
-        en: t("me.settings.lang.en"),
-      },
-      inputValue: locale,
-      showCancelButton: true,
-      confirmButtonText: t("common.confirm"),
-      cancelButtonText: t("common.cancel"),
-      confirmButtonColor: "#b829ff",
-      background: "#141419",
-      color: "#fff",
-    });
-    if (result.isConfirmed && (result.value === "zh" || result.value === "en")) {
-      setLocale(result.value);
-    }
+  const switchLang = () => {
+    setLocale(locale === "zh" ? "en" : "zh");
   };
 
   const onDisconnect = () => {

@@ -8,7 +8,6 @@ import { Wallet, Copy, Loader2 } from "lucide-react";
 import { PageShell } from "@/components/page-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { useLocale } from "@/components/locale-provider";
-import { LangSwitch } from "@/components/lang-switch";
 import { shortenAddress, cn } from "@/lib/utils";
 import Swal from "sweetalert2";
 
@@ -79,7 +78,6 @@ function MeContent() {
                 <div className="text-sm text-white/50">{t("wallet.disconnected")}</div>
               )}
             </div>
-            <LangSwitch />
           </div>
         </CardContent>
       </Card>
