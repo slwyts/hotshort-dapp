@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Loader2, Save, Play, History } from "lucide-react";
+import Link from "next/link";
+import { Loader2, Save, Play, Ticket, ChevronLeft } from "lucide-react";
 import Swal from "sweetalert2";
 import { AdminGuard } from "@/components/admin-guard";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
@@ -43,16 +44,16 @@ export default function AdminLotteryPage() {
     const token = jwt ?? (await signIn());
     if (!token) return;
     if (cfg.ticketPriceUsdt <= 0 || cfg.weeklyRefillHs < 0) {
-      await Swal.fire({ icon: "warning", title: "参数无效", background: "#141419", color: "#fff" });
+      await Swal.fire({ icon: "warning", title: "参数无效", text: "请检查门票价格和奖池补给数量", background: "#141419", color: "#fff" });
       return;
     }
     setSaving(true);
     try {
       await api.post(endpoints.adminLottery, cfg, token);
-      await Swal.fire({ icon: "success", title: "已保存", background: "#141419", color: "#fff", confirmButtonColor: "#b829ff" });
+      await Swal.fire({ icon: "success", title: "保存成功", background: "#141419", color: "#fff", confirmButtonColor: "#b829ff" });
       await refresh();
     } catch (e) {
-      await Swal.fire({ icon: "error", title: "失败", text: (e as Error).message, background: "#141419", color: "#fff" });
+      await Swal.fire({ icon: "error", title: "保存失败", text: (e as Error).message, background: "#141419", color: "#fff" });
     } finally {
       setSaving(false);
     }
@@ -62,9 +63,9 @@ export default function AdminLotteryPage() {
     const c = await Swal.fire({
       icon: "warning",
       title: "确认手动开奖？",
-      text: "通常由 cron 周一 00:00 自动开奖，仅紧急情况手动触发。",
+      text: "通常由系统每周一自动开奖，仅紧急情况手动触发",
       showCancelButton: true,
-      confirmButtonText: "开奖",
+      confirmButtonText: "确认开奖",
       confirmButtonColor: "#b829ff",
       cancelButtonText: "取消",
       background: "#141419",
@@ -82,16 +83,16 @@ export default function AdminLotteryPage() {
       );
       await Swal.fire({
         icon: "success",
-        title: `第 ${r.roundNo} 期开奖`,
+        title: `第 ${r.roundNo} 期开奖完成`,
         html: `中奖号码 <strong style="color:#b829ff;font-family:monospace;font-size:1.4em">${r.winning}</strong><br/>
-               共结算 ${r.settledTickets} 张中奖票`,
+               共结算 ${r.settledTickets} 张中奖彩票`,
         background: "#141419",
         color: "#fff",
         confirmButtonColor: "#b829ff",
       });
       await refresh();
     } catch (e) {
-      await Swal.fire({ icon: "error", title: "失败", text: (e as Error).message, background: "#141419", color: "#fff" });
+      await Swal.fire({ icon: "error", title: "开奖失败", text: (e as Error).message, background: "#141419", color: "#fff" });
     } finally {
       setDrawing(false);
     }
@@ -100,50 +101,58 @@ export default function AdminLotteryPage() {
   return (
     <AdminGuard>
       <div className="container mx-auto px-4 py-12 sm:px-6">
+        <Link href="/admin" className="mb-4 inline-flex items-center gap-1 text-sm text-white/40 hover:text-white/70 transition-colors">
+          <ChevronLeft className="h-4 w-4" /> 返回管理后台
+        </Link>
         <h1 className="text-2xl font-black flex items-center gap-2">
-          <History className="h-6 w-6 text-[#00c6ff]" /> 彩票配置
+          <Ticket className="h-6 w-6 text-[#00c6ff]" /> 彩票管理
         </h1>
         <p className="mt-1 text-sm text-white/50">
-          README §三：每周一 00:00 (UTC+8) cron 自动开奖；门票价、奖池补给可改。
+          门票定价与开奖控制
         </p>
 
         <Card className="mt-8 max-w-xl">
           <CardHeader>
-            <CardTitle>当期：第 {cfg.currentRound} 期</CardTitle>
-            <CardDescription>修改后立即生效（影响下一笔购票）</CardDescription>
+            <CardTitle>当前第 {cfg.currentRound} 期</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4">
+          <CardContent className="flex flex-col gap-5">
             {loading ? (
               <Loader2 className="mx-auto h-5 w-5 animate-spin text-white/40" />
             ) : (
               <>
                 <div>
-                  <label className="text-xs uppercase tracking-widest text-white/50">门票价（USDT）</label>
-                  <Input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={cfg.ticketPriceUsdt}
-                    onChange={(e) => setCfg({ ...cfg, ticketPriceUsdt: Number(e.target.value) })}
-                  />
+                  <label className="text-sm font-medium text-white/70">门票价格</label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={cfg.ticketPriceUsdt}
+                      onChange={(e) => setCfg({ ...cfg, ticketPriceUsdt: Number(e.target.value) })}
+                    />
+                    <span className="text-sm text-white/40">USDT</span>
+                  </div>
                 </div>
                 <div>
-                  <label className="text-xs uppercase tracking-widest text-white/50">每周补给奖池（HS）</label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={cfg.weeklyRefillHs}
-                    onChange={(e) => setCfg({ ...cfg, weeklyRefillHs: Number(e.target.value) })}
-                  />
+                  <label className="text-sm font-medium text-white/70">每周奖池补给</label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={cfg.weeklyRefillHs}
+                      onChange={(e) => setCfg({ ...cfg, weeklyRefillHs: Number(e.target.value) })}
+                    />
+                    <span className="text-sm text-white/40">HS</span>
+                  </div>
                 </div>
-                <div className="flex justify-between gap-2 pt-2">
+                <div className="flex justify-between gap-3 pt-2 border-t border-white/5">
                   <Button variant="danger" onClick={draw} disabled={drawing}>
                     {drawing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                     手动开奖
                   </Button>
                   <Button onClick={save} disabled={saving}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    保存
+                    保存配置
                   </Button>
                 </div>
               </>

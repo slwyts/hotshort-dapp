@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Save, BarChart3 } from "lucide-react";
+import Link from "next/link";
+import { Loader2, Save, BarChart3, ChevronLeft } from "lucide-react";
 import Swal from "sweetalert2";
 import { AdminGuard } from "@/components/admin-guard";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
-import { bpsToPercent } from "@/lib/constants/business-rules";
 
 interface AiCfg {
   volumeMin: number;
@@ -29,7 +29,7 @@ export default function AdminAiConfigPage() {
       const r = await api.get<AiCfg>(endpoints.adminAiConfig);
       setCfg(r);
     } catch {
-      /* 默认值 */
+      /* 使用默认值 */
     } finally {
       setLoading(false);
     }
@@ -43,77 +43,90 @@ export default function AdminAiConfigPage() {
     const token = jwt ?? (await signIn());
     if (!token) return;
     if (cfg.volumeMin <= 0 || cfg.volumeMax < cfg.volumeMin || cfg.ratioBps < 0) {
-      await Swal.fire({ icon: "warning", title: "参数无效", background: "#141419", color: "#fff" });
+      await Swal.fire({ icon: "warning", title: "参数无效", text: "请检查区间和比例设置", background: "#141419", color: "#fff" });
       return;
     }
     setSaving(true);
     try {
       await api.post(endpoints.adminAiConfig, cfg, token);
-      await Swal.fire({ icon: "success", title: "已保存", background: "#141419", color: "#fff", confirmButtonColor: "#b829ff" });
+      await Swal.fire({ icon: "success", title: "保存成功", background: "#141419", color: "#fff", confirmButtonColor: "#b829ff" });
     } catch (e) {
-      await Swal.fire({ icon: "error", title: "失败", text: (e as Error).message, background: "#141419", color: "#fff" });
+      await Swal.fire({ icon: "error", title: "保存失败", text: (e as Error).message, background: "#141419", color: "#fff" });
     } finally {
       setSaving(false);
     }
   };
 
+  const ratioPercent = cfg.ratioBps / 100;
   const dailyExample = ((cfg.volumeMin + cfg.volumeMax) / 2) * (cfg.ratioBps / 10_000);
 
   return (
     <AdminGuard>
       <div className="container mx-auto px-4 py-12 sm:px-6">
+        <Link href="/admin" className="mb-4 inline-flex items-center gap-1 text-sm text-white/40 hover:text-white/70 transition-colors">
+          <ChevronLeft className="h-4 w-4" /> 返回管理后台
+        </Link>
         <h1 className="text-2xl font-black flex items-center gap-2">
           <BarChart3 className="h-6 w-6 text-[#00c6ff]" /> AI 量化配置
         </h1>
         <p className="mt-1 text-sm text-white/50">
-          README §2.2 每日交易额区间 + 分红比例。每日 cron 在区间内随机一个值，乘以比例进入分红池。
+          设置每日模拟交易金额范围和分红比例，系统每天自动在区间内随机生成交易额
         </p>
 
         <Card className="mt-8 max-w-xl">
           <CardHeader>
-            <CardTitle>每日股票分红参数</CardTitle>
-            <CardDescription>示例：10w-20w 区间 × 1% → 平均日分红池 ≈ 1500 USDT</CardDescription>
+            <CardTitle>每日分红池参数</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4">
+          <CardContent className="flex flex-col gap-5">
             {loading ? (
               <Loader2 className="mx-auto h-5 w-5 animate-spin text-white/40" />
             ) : (
               <>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="text-xs uppercase tracking-widest text-white/50">区间下限（USDT）</label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={cfg.volumeMin}
-                      onChange={(e) => setCfg({ ...cfg, volumeMin: Number(e.target.value) })}
-                    />
+                    <label className="text-sm font-medium text-white/70">交易额下限</label>
+                    <div className="mt-1 flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        value={cfg.volumeMin}
+                        onChange={(e) => setCfg({ ...cfg, volumeMin: Number(e.target.value) })}
+                      />
+                      <span className="text-sm text-white/40">USDT</span>
+                    </div>
                   </div>
                   <div>
-                    <label className="text-xs uppercase tracking-widest text-white/50">区间上限（USDT）</label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={cfg.volumeMax}
-                      onChange={(e) => setCfg({ ...cfg, volumeMax: Number(e.target.value) })}
-                    />
+                    <label className="text-sm font-medium text-white/70">交易额上限</label>
+                    <div className="mt-1 flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        value={cfg.volumeMax}
+                        onChange={(e) => setCfg({ ...cfg, volumeMax: Number(e.target.value) })}
+                      />
+                      <span className="text-sm text-white/40">USDT</span>
+                    </div>
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs uppercase tracking-widest text-white/50">
-                    分红比例（bps；100 = 1%）
-                  </label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={10_000}
-                    value={cfg.ratioBps}
-                    onChange={(e) => setCfg({ ...cfg, ratioBps: Number(e.target.value) })}
-                  />
-                  <div className="mt-1 text-xs text-[#00c6ff]">≈ {bpsToPercent(cfg.ratioBps)}</div>
+                  <label className="text-sm font-medium text-white/70">分红比例</label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step="0.01"
+                      value={ratioPercent.toFixed(2)}
+                      onChange={(e) => setCfg({ ...cfg, ratioBps: Math.round(Number(e.target.value) * 100) })}
+                    />
+                    <span className="text-sm text-white/40">%</span>
+                  </div>
                 </div>
-                <div className="rounded-md border border-[#00c6ff]/30 bg-[#00c6ff]/5 p-3 text-xs text-[#00c6ff]">
-                  📊 每日分红池 USDT 估算：{Math.round(dailyExample).toLocaleString("en-US")}
+                <div className="rounded-xl border border-[#00c6ff]/20 bg-[#00c6ff]/5 p-4">
+                  <div className="text-xs text-white/50">预估每日分红池</div>
+                  <div className="mt-1 text-lg font-bold text-[#00c6ff]">
+                    ≈ {Math.round(dailyExample).toLocaleString("en-US")} USDT
+                  </div>
                 </div>
                 <Button onClick={save} disabled={saving} className="ml-auto">
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

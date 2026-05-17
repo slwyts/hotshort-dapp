@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Save } from "lucide-react";
+import Link from "next/link";
+import { Loader2, Save, ChevronLeft } from "lucide-react";
 import Swal from "sweetalert2";
 import { AdminGuard } from "@/components/admin-guard";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
@@ -13,7 +14,6 @@ import {
   STAKE_ASSETS,
   STAKE_LOCK_MONTHS,
   STAKE_DEFAULT_RATES_BPS,
-  bpsToPercent,
   type StakeAsset,
   type StakeLockMonths,
 } from "@/lib/constants/business-rules";
@@ -23,6 +23,12 @@ interface RateRow {
   lock_months: number;
   monthly_rate_bps: number;
 }
+
+const ASSET_LABELS: Record<string, string> = {
+  USDT: "USDT",
+  HS: "HS",
+  LP: "LP 流动性",
+};
 
 export default function AdminRatesPage() {
   const { jwt, signIn } = useSiweJwt();
@@ -35,13 +41,11 @@ export default function AdminRatesPage() {
     try {
       const r = await api.get<{ rates: RateRow[] }>(endpoints.stakeOrders.replace("/orders", "/rates"));
       const map: Record<string, number> = {};
-      // 先填默认
       for (const a of STAKE_ASSETS) {
         for (const m of STAKE_LOCK_MONTHS) {
           map[`${a}:${m}`] = STAKE_DEFAULT_RATES_BPS[a][m];
         }
       }
-      // 再覆盖 DB
       for (const row of r.rates ?? []) {
         map[`${row.asset}:${row.lock_months}`] = row.monthly_rate_bps;
       }
@@ -56,9 +60,9 @@ export default function AdminRatesPage() {
   }, []);
 
   const update = (a: StakeAsset, m: StakeLockMonths, v: string) => {
-    const num = Number(v);
-    if (!Number.isFinite(num) || num < 0) return;
-    setRates((prev) => ({ ...prev, [`${a}:${m}`]: Math.floor(num) }));
+    const percent = Number(v);
+    if (!Number.isFinite(percent) || percent < 0) return;
+    setRates((prev) => ({ ...prev, [`${a}:${m}`]: Math.round(percent * 100) }));
   };
 
   const save = async () => {
@@ -78,8 +82,8 @@ export default function AdminRatesPage() {
       await api.post(endpoints.adminRates, payload, token);
       await Swal.fire({
         icon: "success",
-        title: "已保存",
-        text: "新订单将以新利率结算。已存订单不受影响。",
+        title: "保存成功",
+        text: "新利率对新订单立即生效，已有订单不受影响。",
         background: "#141419",
         color: "#fff",
         confirmButtonColor: "#b829ff",
@@ -101,15 +105,17 @@ export default function AdminRatesPage() {
   return (
     <AdminGuard>
       <div className="container mx-auto px-4 py-12 sm:px-6">
-        <h1 className="text-2xl font-black">利率配置</h1>
+        <Link href="/admin" className="mb-4 inline-flex items-center gap-1 text-sm text-white/40 hover:text-white/70 transition-colors">
+          <ChevronLeft className="h-4 w-4" /> 返回管理后台
+        </Link>
+        <h1 className="text-2xl font-black">收益率管理</h1>
         <p className="mt-1 text-sm text-white/50">
-          单位为 bps（1% = 100 bps）。保存后只影响新订单，已存订单使用下单时的快照利率。
+          设置各资产不同锁仓期的月收益率。保存后仅对新订单生效。
         </p>
 
         <Card className="mt-8">
           <CardHeader>
-            <CardTitle>月化收益率</CardTitle>
-            <CardDescription>README §1.3 基准：USDT/HS 0.5/2/4/8%；LP 1/3/10/24%</CardDescription>
+            <CardTitle>月收益率（%）</CardTitle>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -117,29 +123,30 @@ export default function AdminRatesPage() {
                 <Loader2 className="mx-auto h-5 w-5 animate-spin" />
               </div>
             ) : (
-              <div className="space-y-6">
+              <div className="space-y-8">
                 {STAKE_ASSETS.map((a) => (
                   <div key={a}>
-                    <div className="mb-2 text-sm font-bold text-white/70">{a}</div>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="mb-3 text-sm font-bold text-white/80">{ASSET_LABELS[a] ?? a}</div>
+                    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                       {STAKE_LOCK_MONTHS.map((m) => (
-                        <div key={m}>
-                          <label className="text-xs text-white/40">{m} 月（bps）</label>
-                          <Input
-                            type="number"
-                            min={0}
-                            value={rates[`${a}:${m}`] ?? ""}
-                            onChange={(e) => update(a, m, e.target.value)}
-                          />
-                          <div className="mt-1 text-xs text-[#00c6ff]">
-                            ≈ {bpsToPercent(rates[`${a}:${m}`] ?? 0)} / 月
+                        <div key={m} className="rounded-lg border border-white/10 bg-black/30 p-3">
+                          <label className="text-xs text-white/50">{m} 个月</label>
+                          <div className="mt-1 flex items-center gap-2">
+                            <Input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={((rates[`${a}:${m}`] ?? 0) / 100).toFixed(2)}
+                              onChange={(e) => update(a, m, e.target.value)}
+                            />
+                            <span className="text-sm text-white/40">%</span>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
                 ))}
-                <div className="flex justify-end gap-2 pt-4">
+                <div className="flex justify-end gap-3 pt-4 border-t border-white/5">
                   <Button variant="outline" onClick={() => void load()}>
                     重置
                   </Button>

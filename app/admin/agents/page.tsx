@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { useAccount } from "wagmi";
-import { Loader2, Users } from "lucide-react";
+import { Loader2, Users, ChevronLeft } from "lucide-react";
 import { AdminGuard } from "@/components/admin-guard";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
@@ -19,6 +20,14 @@ interface AgentRow {
   ai_orders_usdt: string;
   referral_rewards_usdt: string;
 }
+
+const TIER_LABELS: Record<string, string> = {
+  genesis: "创世",
+  glory: "荣耀",
+  eternal: "永恒",
+  shine: "鑫耀",
+  pioneer: "开拓者",
+};
 
 export default function AdminAgentsPage() {
   const { isConnected } = useAccount();
@@ -50,22 +59,24 @@ export default function AdminAgentsPage() {
   return (
     <AdminGuard>
       <div className="container mx-auto px-4 py-12 sm:px-6">
+        <Link href="/admin" className="mb-4 inline-flex items-center gap-1 text-sm text-white/40 hover:text-white/70 transition-colors">
+          <ChevronLeft className="h-4 w-4" /> 返回管理后台
+        </Link>
         <h1 className="text-2xl font-black flex items-center gap-2">
-          <Users className="h-6 w-6 text-[#00c6ff]" /> 代理商及统计
+          <Users className="h-6 w-6 text-[#00c6ff]" /> 代理商
         </h1>
         <p className="mt-1 text-sm text-white/50">
-          按团队规模 / 累计返佣排序的 Top 代理商。按地址或 tier 筛选。
+          团队数据与返佣统计
         </p>
 
         <Card className="mt-8">
           <CardHeader>
-            <CardTitle>代理商榜单</CardTitle>
-            <CardDescription>三代下线团队规模 + 累计返佣（含 AI 直推 + 三代股票分红 + 燃烧推广）</CardDescription>
+            <CardTitle>代理商列表</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="mb-4 flex gap-2">
               <Input
-                placeholder="按地址 / tier 搜索..."
+                placeholder="搜索地址或等级..."
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
                 onKeyDown={(e) => {
@@ -86,28 +97,28 @@ export default function AdminAgentsPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-white/10 text-left text-xs uppercase text-white/40">
-                      <th className="px-2 py-2">地址</th>
-                      <th className="px-2 py-2">最高档</th>
-                      <th className="px-2 py-2 text-right">三代团队</th>
-                      <th className="px-2 py-2 text-right">套餐数</th>
-                      <th className="px-2 py-2 text-right">累计投入</th>
-                      <th className="px-2 py-2 text-right">累计返佣</th>
+                    <tr className="border-b border-white/10 text-left text-xs text-white/40">
+                      <th className="px-3 py-3">地址</th>
+                      <th className="px-3 py-3">等级</th>
+                      <th className="px-3 py-3 text-right">团队人数</th>
+                      <th className="px-3 py-3 text-right">套餐订单</th>
+                      <th className="px-3 py-3 text-right">累计投入 (USDT)</th>
+                      <th className="px-3 py-3 text-right">累计返佣 (USDT)</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r) => (
-                      <tr key={r.address} className="border-b border-white/5 hover:bg-white/[0.02]">
-                        <td className="px-2 py-2 font-mono text-xs text-white/70">
+                    {rows.map((r, i) => (
+                      <tr key={r.address} className={`border-b border-white/5 ${i % 2 === 0 ? "bg-white/[0.01]" : ""} hover:bg-white/[0.03]`}>
+                        <td className="px-3 py-3 font-mono text-xs text-white/70">
                           {shortenAddress(r.address, 6)}
                         </td>
-                        <td className="px-2 py-2 text-[#b829ff]">{r.tier}</td>
-                        <td className="px-2 py-2 text-right">{r.team_size.toLocaleString()}</td>
-                        <td className="px-2 py-2 text-right">{r.ai_orders_count}</td>
-                        <td className="px-2 py-2 text-right text-white/80">
+                        <td className="px-3 py-3 text-[#b829ff] font-medium">{TIER_LABELS[r.tier] ?? r.tier}</td>
+                        <td className="px-3 py-3 text-right">{r.team_size.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{r.ai_orders_count}</td>
+                        <td className="px-3 py-3 text-right text-white/80">
                           {formatNumber(Number(r.ai_orders_usdt) / 1e18, 0)}
                         </td>
-                        <td className="px-2 py-2 text-right text-[#00c6ff]">
+                        <td className="px-3 py-3 text-right text-[#00c6ff] font-medium">
                           {formatNumber(Number(r.referral_rewards_usdt) / 1e18, 2)}
                         </td>
                       </tr>
