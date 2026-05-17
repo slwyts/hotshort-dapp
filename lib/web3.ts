@@ -12,6 +12,10 @@ const localhost = defineChain({
 
 const networkMode = process.env.NEXT_PUBLIC_NETWORK || "bsc";
 
+const BSC_RPC = process.env.NEXT_PUBLIC_BSC_RPC || "https://bsc-rpc.publicnode.com";
+const BSC_TESTNET_RPC =
+  process.env.NEXT_PUBLIC_BSC_TESTNET_RPC || "https://bsc-testnet-rpc.publicnode.com";
+
 let chains: readonly [typeof localhost] | readonly [typeof bscTestnet] | readonly [typeof bsc];
 let transports: Record<number, ReturnType<typeof http>>;
 
@@ -20,10 +24,10 @@ if (networkMode === "localnet") {
   transports = { [localhost.id]: http() };
 } else if (networkMode === "bsc-testnet") {
   chains = [bscTestnet] as const;
-  transports = { [bscTestnet.id]: http() };
+  transports = { [bscTestnet.id]: http(BSC_TESTNET_RPC) };
 } else {
   chains = [bsc] as const;
-  transports = { [bsc.id]: http() };
+  transports = { [bsc.id]: http(BSC_RPC) };
 }
 
 export const config = createConfig({
