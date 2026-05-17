@@ -1,11 +1,13 @@
 import { Hono } from "hono";
-import { type Address } from "viem";
+import { type Address, type Hex } from "viem";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
 import { upsertUser } from "../lib/users";
 import { ulid } from "../lib/ulid";
-import { signClaim } from "../lib/sign";
-import { requireSecret } from "../env";
+import { nowSeconds } from "../lib/time";
+import { createClaimSignature } from "../lib/claims";
+import { markRewardRowsClaimed, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
+import { verifyVaultBurn } from "../lib/vault-events";
 import {
   BURN_AIRDROP_MIN_USDT,
   BURN_PERSONAL_DOUBLE_OUT_BPS,
@@ -29,7 +31,7 @@ async function ensurePersonalRow(env: Env, user: string): Promise<{ total: bigin
     await env.DB.prepare(
       "INSERT INTO burn_personal_status (user, updated_at) VALUES (?, ?)",
     )
-      .bind(user, Math.floor(Date.now() / 1000))
+      .bind(user, await nowSeconds(env))
       .run();
     return { total: 0n, claimed: 0n, out: null };
   }
@@ -48,17 +50,35 @@ burn.get("/me", async (c) => {
   const status = await ensurePersonalRow(c.env, user);
 
   // 我作为 Top10 的未领奖
-  const top10Pending = await c.env.DB.prepare(
-    "SELECT COALESCE(SUM(CAST(reward_hs AS INTEGER)), 0) AS amt FROM burn_top10_settlements WHERE user = ? AND claimed = 0",
+  const pendingRows = await c.env.DB.prepare(
+    "SELECT reward_hs FROM burn_top10_settlements WHERE user = ? AND claimed = 0",
   )
     .bind(user)
-    .first<{ amt: number | string }>();
+    .all<{ reward_hs: string }>();
+  let top10Pending = 0n;
+  for (const row of pendingRows.results ?? []) top10Pending += BigInt(row.reward_hs);
+
+  const rewardRows = await c.env.DB.prepare(
+    `SELECT reward_amount FROM reward_claims
+      WHERE user = ? AND claimed = 0 AND reward_token = 'HS'
+        AND kind IN ('burn-weight', 'stake-burn-dividend', 'ai-burn-airdrop')`,
+  )
+    .bind(user)
+    .all<{ reward_amount: string }>();
+  for (const row of rewardRows.results ?? []) top10Pending += BigInt(row.reward_amount);
+
+  const referralRows = await c.env.DB.prepare(
+    "SELECT reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0 AND reward_token = 'HS'",
+  )
+    .bind(user)
+    .all<{ reward_amount: string }>();
+  for (const row of referralRows.results ?? []) top10Pending += BigInt(row.reward_amount);
 
   return c.json({
     totalBurnedHs: status.total.toString(),
     personalClaimedHs: status.claimed.toString(),
     out: !!status.out,
-    top10PendingHs: String(top10Pending?.amt ?? 0),
+    top10PendingHs: top10Pending.toString(),
     eligibleAirdrop: status.total >= BigInt(Math.floor(BURN_AIRDROP_MIN_USDT * 1e18)),
   });
 });
@@ -67,10 +87,15 @@ burn.get("/me", async (c) => {
 burn.get("/leaderboard", async (c) => {
   const round = await getCurrentBurnRound(c.env);
   const rs = await c.env.DB.prepare(
-    `SELECT user, COALESCE(SUM(CAST(hs_amount AS INTEGER)), 0) AS burn_hs
-       FROM burn_records WHERE settled_round IS NULL GROUP BY user ORDER BY burn_hs DESC LIMIT 100`,
-  ).all<{ user: string; burn_hs: number | string }>();
-  return c.json({ round, rows: rs.results ?? [] });
+    "SELECT user, hs_amount FROM burn_records WHERE settled_round IS NULL",
+  ).all<{ user: string; hs_amount: string }>();
+  const totals = new Map<string, bigint>();
+  for (const row of rs.results ?? []) totals.set(row.user, (totals.get(row.user) ?? 0n) + BigInt(row.hs_amount));
+  const rows = [...totals.entries()]
+    .map(([user, burnHs]) => ({ user, burn_hs: burnHs.toString() }))
+    .sort((a, b) => (BigInt(a.burn_hs) === BigInt(b.burn_hs) ? a.user.localeCompare(b.user) : BigInt(a.burn_hs) > BigInt(b.burn_hs) ? -1 : 1))
+    .slice(0, 100);
+  return c.json({ round, rows });
 });
 
 /**
@@ -95,11 +120,18 @@ burn.post("/record", async (c) => {
 
   const id = ulid();
   const amount = BigInt(body.hsAmountWei);
-  const now = Math.floor(Date.now() / 1000);
+  const now = await nowSeconds(c.env);
 
   // 防重：同 tx_hash 已写入则跳过
   const exists = await c.env.DB.prepare("SELECT id FROM burn_records WHERE source_tx_hash = ?").bind(body.sourceTxHash).first();
   if (exists) return c.json({ id: exists.id as string, dedup: true });
+
+  await verifyVaultBurn(c.env, {
+    txHash: body.sourceTxHash as Hex,
+    user: user as Address,
+    amount,
+    referrer: body.referrer ? body.referrer.toLowerCase() as Address : undefined,
+  });
 
   await c.env.DB.prepare(
     `INSERT INTO burn_records (id, user, hs_amount, referrer, burned_at, source_tx_hash)
@@ -127,10 +159,7 @@ burn.post("/record", async (c) => {
 });
 
 /**
- * POST /burn/claim  签名领取（个人燃烧权益 + 当周 Top10）
- *   - 个人燃烧权益：§4.2 "仅可领取 1 次，双倍可出局"。返回单次签名（基于已积累的待领额度）。
- *     这里一个简化：未单独维护"个人池子"，直接以累计燃烧的 20% 折成 HS 一次领取（与"权重分红"档差别由 P3 cron 后续完善）。
- *     P0 阶段先不实现链上签名分发，把 personal_claimed_hs 累加到记录中，方便后台对账，不出签名。
+ * POST /burn/claim/top10  签名领取燃烧模块可领 HS：Top10、权重分红、推广奖励、质押分红。
  */
 burn.post("/claim/top10", async (c) => {
   const user = await requireUser(c);
@@ -144,43 +173,55 @@ burn.post("/claim/top10", async (c) => {
 
   let total = 0n;
   for (const r of rows.results ?? []) total += BigInt(r.reward_hs);
+
+  const rewardRows = await c.env.DB.prepare(
+    `SELECT id, user, kind, reward_token, reward_amount, round, source_ref
+       FROM reward_claims
+      WHERE user = ? AND claimed = 0 AND reward_token = 'HS'
+        AND kind IN ('burn-weight', 'stake-burn-dividend', 'ai-burn-airdrop')`,
+  )
+    .bind(user)
+    .all<RewardClaimRow>();
+  total += sumRewardRows(rewardRows.results ?? []);
+
+  const referralRows = await c.env.DB.prepare(
+    "SELECT id, reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0 AND reward_token = 'HS'",
+  )
+    .bind(user)
+    .all<{ id: string; reward_amount: string }>();
+  for (const row of referralRows.results ?? []) total += BigInt(row.reward_amount);
+
   if (total <= 0n) return c.json({ amount: "0" });
 
-  const hsToken = c.env.HS_TOKEN as Address;
-  const vault = c.env.VAULT_ADDRESS as Address;
-  const chainId = Number(c.env.CHAIN_ID);
-  const pk = requireSecret(c.env, "SIGNER_PRIVATE_KEY") as `0x${string}`;
-  const nonce = BigInt("0x" + ulid().slice(0, 16));
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 30 * 60);
+  const hsToken = c.env.HS_TOKEN.toLowerCase() as Address;
   const reason = 4; // BURN_DIVIDEND
 
-  const signature = await signClaim(pk, chainId, vault, {
+  const claim = await createClaimSignature(c.env, {
     user: user as Address,
     token: hsToken,
-    amount: total,
-    nonce,
-    deadline,
+    payouts: [{ recipient: user as Address, amount: total }],
     reason,
   });
-
-  await c.env.DB.prepare(
-    `INSERT INTO claim_signatures (nonce, user, token, amount, reason, deadline, signature, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(nonce.toString(), user, hsToken.toLowerCase(), total.toString(), reason, Number(deadline), signature, Math.floor(Date.now() / 1000))
-    .run();
 
   await c.env.DB.prepare("UPDATE burn_top10_settlements SET claimed = 1 WHERE user = ? AND claimed = 0")
     .bind(user)
     .run();
+  await markRewardRowsClaimed(c.env, rewardRows.results ?? [], claim.nonce);
+  await c.env.DB.prepare("UPDATE referral_rewards SET claimed = 1 WHERE user = ? AND claimed = 0 AND reward_token = 'HS'")
+    .bind(user)
+    .run();
+  const status = await ensurePersonalRow(c.env, user);
+  await c.env.DB.prepare(
+    "UPDATE burn_personal_status SET total_personal_claimed_hs = ?, updated_at = ? WHERE user = ?",
+  )
+    .bind((status.claimed + total).toString(), await nowSeconds(c.env), user)
+    .run();
 
   return c.json({
-    token: hsToken,
-    amount: total.toString(),
-    nonce: nonce.toString(),
-    deadline: Number(deadline),
-    reason,
-    signature,
+    ...claim,
+    top10Rows: rows.results?.length ?? 0,
+    rewardRows: rewardRows.results?.length ?? 0,
+    referralRows: referralRows.results?.length ?? 0,
   });
 });
 
@@ -213,7 +254,7 @@ burn.post("/airdrop/submit", async (c) => {
     `INSERT INTO airdrop_list (id, user, hotshort_account, burn_total, status, submitted_at)
      VALUES (?, ?, ?, ?, 'pending', ?)`,
   )
-    .bind(id, user, body.hotshortAccount, status.total.toString(), Math.floor(Date.now() / 1000))
+    .bind(id, user, body.hotshortAccount, status.total.toString(), await nowSeconds(c.env))
     .run();
   return c.json({ id, created: true });
 });

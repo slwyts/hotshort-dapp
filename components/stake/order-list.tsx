@@ -67,11 +67,14 @@ export function OrderList({ refreshKey }: { refreshKey: number }) {
       });
       const sig = await api.post<{
         token: string;
+        recipients: string[];
+        amounts: string[];
         amount: string;
         nonce: string;
         deadline: number;
         reason: number;
         signature: string;
+        claimableHs: string;
         fuelBurnHs: string;
       }>(endpoints.stakeClaim, { orderId: id }, token);
 
@@ -88,7 +91,8 @@ export function OrderList({ refreshKey }: { refreshKey: number }) {
         functionName: "claim",
         args: [
           sig.token as `0x${string}`,
-          BigInt(sig.amount),
+          sig.recipients as `0x${string}`[],
+          sig.amounts.map((amount) => BigInt(amount)),
           BigInt(sig.nonce),
           BigInt(sig.deadline),
           sig.reason,
@@ -99,7 +103,7 @@ export function OrderList({ refreshKey }: { refreshKey: number }) {
       Swal.fire({
         icon: "success",
         title: t("stake.claim.successTitle"),
-        html: `<p>${t("stake.claim.successBody", { amount: formatNumber(Number(formatUnits(BigInt(sig.amount), 18)), 4) })}</p>
+        html: `<p>${t("stake.claim.successBody", { amount: formatNumber(Number(formatUnits(BigInt(sig.claimableHs), 18)), 4) })}</p>
                <p class="text-xs text-white/50 mt-2">${t("stake.claim.fuelNote", { amount: formatNumber(Number(formatUnits(BigInt(sig.fuelBurnHs), 18)), 4) })}</p>
                <a href="https://bscscan.com/tx/${txHash}" target="_blank" rel="noopener" class="text-[#00c6ff] text-xs">${shortenAddress(txHash)}</a>`,
         background: "#141419",

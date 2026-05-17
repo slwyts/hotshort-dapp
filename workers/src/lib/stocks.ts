@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { nowSeconds } from "./time";
 
 const SCALE = 10n ** 18n;
 
@@ -22,7 +23,7 @@ export async function getHoldings(env: Env, user: string): Promise<Holdings> {
 export async function addStock(env: Env, user: string, amount: bigint, locked = false): Promise<void> {
   if (amount <= 0n) return;
   const u = user.toLowerCase();
-  const now = Math.floor(Date.now() / 1000);
+  const now = await nowSeconds(env);
   const { total, locked: lk } = await getHoldings(env, u);
   const newTotal = total + amount;
   const newLocked = locked ? lk + amount : lk;
@@ -37,7 +38,7 @@ export async function addStock(env: Env, user: string, amount: bigint, locked = 
 export async function decLockedStock(env: Env, user: string, amount: bigint): Promise<void> {
   if (amount <= 0n) return;
   const u = user.toLowerCase();
-  const now = Math.floor(Date.now() / 1000);
+  const now = await nowSeconds(env);
   const { locked } = await getHoldings(env, u);
   const newLocked = locked > amount ? locked - amount : 0n;
   await env.DB.prepare(

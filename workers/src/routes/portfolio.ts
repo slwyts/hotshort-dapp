@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
+import { nowSeconds } from "../lib/time";
 
 export const portfolio = new Hono<{ Bindings: Env }>();
 
@@ -47,6 +48,15 @@ async function readPrices(env: Env): Promise<{ hs: number; stock: number }> {
   };
 }
 
+function parseWei(value: unknown): bigint {
+  const text = String(value ?? "0");
+  return /^\d+$/.test(text) ? BigInt(text) : 0n;
+}
+
+function weiToNumber(value: bigint): number {
+  return Number(value) / 1e18;
+}
+
 /**
  * GET /portfolio
  * 返回当前用户在 DApp 内的总资产（USDT 等值）。
@@ -65,30 +75,33 @@ portfolio.get("/", async (c) => {
 
   // 1) 质押进行中（未领取的本金）
   const stakeRow = await c.env.DB.prepare(
-    `SELECT asset, COALESCE(SUM(CAST(amount AS INTEGER)), 0) AS sum_amount
-     FROM stake_orders WHERE user = ? AND claimed = 0
-     GROUP BY asset`,
+    `SELECT asset, amount
+     FROM stake_orders WHERE user = ? AND claimed = 0`,
   )
     .bind(user)
-    .all<{ asset: string; sum_amount: number | string }>();
+    .all<{ asset: string; amount: string }>();
 
   let stakeUsdtNum = 0;
+  let stakeOrdersWei = 0n;
   for (const r of stakeRow.results ?? []) {
-    const amount = Number(BigInt(String(r.sum_amount))) / 1e18;
+    const amountWei = parseWei(r.amount);
+    stakeOrdersWei += amountWei;
+    const amount = weiToNumber(amountWei);
     if (r.asset === "USDT") stakeUsdtNum += amount;
     else if (r.asset === "HS") stakeUsdtNum += amount * prices.hs;
     // LP 价值复杂（需要拉 PancakePair 储备），暂折半保守按 HS×2 估算或忽略；这里按 0 处理
   }
 
   // 2) AI 套餐 usdt_in 累计
-  const aiRow = await c.env.DB.prepare(
-    `SELECT COALESCE(SUM(CAST(usdt_in AS INTEGER)), 0) AS sum_usdt
+  const aiRows = await c.env.DB.prepare(
+    `SELECT usdt_in
      FROM ai_orders WHERE user = ?`,
   )
     .bind(user)
-    .first<{ sum_usdt: number | string }>();
-  const aiUsdtWei = BigInt(String(aiRow?.sum_usdt ?? 0));
-  const aiUsdtNum = Number(aiUsdtWei) / 1e18;
+    .all<{ usdt_in: string }>();
+  let aiUsdtWei = 0n;
+  for (const r of aiRows.results ?? []) aiUsdtWei += parseWei(r.usdt_in);
+  const aiUsdtNum = weiToNumber(aiUsdtWei);
 
   // 3) 股票持仓
   const holdRow = await c.env.DB.prepare(
@@ -98,8 +111,8 @@ portfolio.get("/", async (c) => {
     .first<{ total_stock: string; locked_stock: string }>();
   const stockTotalWei = BigInt(holdRow?.total_stock ?? "0");
   const stockLockedWei = BigInt(holdRow?.locked_stock ?? "0");
-  const stockTotalNum = Number(stockTotalWei) / 1e18;
-  const stockLockedNum = Number(stockLockedWei) / 1e18;
+  const stockTotalNum = weiToNumber(stockTotalWei);
+  const stockLockedNum = weiToNumber(stockLockedWei);
   const stockUsdtNum = stockTotalNum * prices.stock;
   const stockLockedUsdtNum = stockLockedNum * prices.stock;
 
@@ -110,54 +123,59 @@ portfolio.get("/", async (c) => {
      FROM stake_orders
      WHERE user = ? AND claimed = 0 AND matures_at <= ?`,
   )
-    .bind(user, Math.floor(Date.now() / 1000))
+    .bind(user, await nowSeconds(c.env))
     .all<{ asset: string; amount: string; monthly_rate_bps: number; lock_months: number }>();
   let stakePendingUsdt = 0;
   for (const o of stakeMatured.results ?? []) {
-    const principalNum = Number(BigInt(o.amount)) / 1e18;
+    const principalNum = weiToNumber(parseWei(o.amount));
     const principalUsdt = o.asset === "USDT" ? principalNum : o.asset === "HS" ? principalNum * prices.hs : 0;
     const yieldUsdt = (principalUsdt * o.monthly_rate_bps * o.lock_months) / 10_000;
     stakePendingUsdt += yieldUsdt * 0.95; // 95% 给用户，5% 燃烧
   }
 
   // 4b) 彩票中奖未领（HS）
-  const lotRow = await c.env.DB.prepare(
-    `SELECT COALESCE(SUM(CAST(prize_hs AS INTEGER)), 0) AS sum_hs
+  const lotRows = await c.env.DB.prepare(
+    `SELECT prize_hs
      FROM lottery_tickets WHERE user = ? AND claimed = 0 AND prize_hs IS NOT NULL`,
   )
     .bind(user)
-    .first<{ sum_hs: number | string }>();
-  const lotPendingUsdt = (Number(BigInt(String(lotRow?.sum_hs ?? 0))) / 1e18) * prices.hs;
+    .all<{ prize_hs: string }>();
+  let lotPendingHsWei = 0n;
+  for (const r of lotRows.results ?? []) lotPendingHsWei += parseWei(r.prize_hs);
+  const lotPendingUsdt = weiToNumber(lotPendingHsWei) * prices.hs;
 
   // 4c) AI 分红 + 团队 STOCK 奖励未领（折算 USDT）
-  const divRow = await c.env.DB.prepare(
-    `SELECT COALESCE(SUM(CAST(stock_share AS INTEGER)), 0) AS sum_stock
+  const divRows = await c.env.DB.prepare(
+    `SELECT stock_share
      FROM ai_dividend_user_daily WHERE user = ? AND claimed = 0`,
   )
     .bind(user)
-    .first<{ sum_stock: number | string }>();
-  const divPendingUsdt = (Number(BigInt(String(divRow?.sum_stock ?? 0))) / 1e18) * prices.stock;
+    .all<{ stock_share: string }>();
+  let divPendingStockWei = 0n;
+  for (const r of divRows.results ?? []) divPendingStockWei += parseWei(r.stock_share);
+  const divPendingUsdt = weiToNumber(divPendingStockWei) * prices.stock;
 
   // 4d) 燃烧周榜未领（HS）
-  const burnRow = await c.env.DB.prepare(
-    `SELECT COALESCE(SUM(CAST(reward_hs AS INTEGER)), 0) AS sum_hs
+  const burnRows = await c.env.DB.prepare(
+    `SELECT reward_hs
      FROM burn_top10_settlements WHERE user = ? AND claimed = 0`,
   )
     .bind(user)
-    .first<{ sum_hs: number | string }>();
-  const burnPendingUsdt = (Number(BigInt(String(burnRow?.sum_hs ?? 0))) / 1e18) * prices.hs;
+    .all<{ reward_hs: string }>();
+  let burnPendingHsWei = 0n;
+  for (const r of burnRows.results ?? []) burnPendingHsWei += parseWei(r.reward_hs);
+  const burnPendingUsdt = weiToNumber(burnPendingHsWei) * prices.hs;
 
   // 4e) 团队奖励未领（USDT / STOCK / HS 三种 token，混合折算）
   const refRow = await c.env.DB.prepare(
-    `SELECT reward_token, COALESCE(SUM(CAST(reward_amount AS INTEGER)), 0) AS sum_wei
-     FROM referral_rewards WHERE user = ? AND claimed = 0
-     GROUP BY reward_token`,
+    `SELECT reward_token, reward_amount
+     FROM referral_rewards WHERE user = ? AND claimed = 0`,
   )
     .bind(user)
-    .all<{ reward_token: string; sum_wei: number | string }>();
+    .all<{ reward_token: string; reward_amount: string }>();
   let refPendingUsdt = 0;
   for (const r of refRow.results ?? []) {
-    const num = Number(BigInt(String(r.sum_wei))) / 1e18;
+    const num = weiToNumber(parseWei(r.reward_amount));
     if (r.reward_token === "USDT") refPendingUsdt += num;
     else if (r.reward_token === "HS") refPendingUsdt += num * prices.hs;
     else if (r.reward_token === "STOCK") refPendingUsdt += num * prices.stock;
@@ -183,7 +201,7 @@ portfolio.get("/", async (c) => {
     hsPriceUsdt: prices.hs,
     stockPriceUsdt: prices.stock,
     raw: {
-      stakeOrdersWei: "0",
+      stakeOrdersWei: stakeOrdersWei.toString(),
       aiOrdersUsdtWei: aiUsdtWei.toString(),
       stockTotalWei: stockTotalWei.toString(),
       stockLockedWei: stockLockedWei.toString(),

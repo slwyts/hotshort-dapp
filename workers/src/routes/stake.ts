@@ -1,12 +1,13 @@
 import { Hono } from "hono";
-import { type Address } from "viem";
+import { type Address, type Hex } from "viem";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
 import { upsertUser, createStakeOrder } from "../lib/users";
 import { getCurrentRateBps } from "../lib/rates";
-import { signClaim } from "../lib/sign";
-import { ulid } from "../lib/ulid";
-import { requireSecret } from "../env";
+import { nowSeconds } from "../lib/time";
+import { createClaimSignature } from "../lib/claims";
+import { stakeAssetWeiToUsdtWei, tokenForStakeAsset } from "../lib/pricing";
+import { verifyVaultDeposit } from "../lib/vault-events";
 import {
   STAKE_ASSETS,
   STAKE_LOCK_MONTHS,
@@ -19,6 +20,7 @@ import {
 export const stake = new Hono<{ Bindings: Env }>();
 
 const HS_TOKEN_FALLBACK = "0xcF4907621f0d9803c7288423B4303226b696B533";
+const DEAD_ADDRESS = "0x000000000000000000000000000000000000dEaD" as Address;
 
 /**
  * GET /stake/rates  当前生效利率（前端表单展示用）。
@@ -48,8 +50,7 @@ stake.get("/orders", async (c) => {
 /**
  * POST /stake/orders  创建一笔质押订单（前端已经在链上 deposit）。
  * 入参: { sourceTxHash, asset, amountWei, lockMonths, referrer? }
- * Worker 验证：tx 包含 Vault.Deposited(user, token, amountWei, purpose=1, ref=keccak('stake'+sourceTxHash))。
- * 简化版（P1）：信任前端提交，indexer 后续补充对账。
+ * Worker 验证：tx 包含 Vault.Deposited(user, token, amountWei, purpose=1)。
  */
 stake.post("/orders", async (c) => {
   const user = await requireUser(c);
@@ -69,6 +70,21 @@ stake.post("/orders", async (c) => {
   if (!body.sourceTxHash || !/^0x[a-fA-F0-9]{64}$/.test(body.sourceTxHash)) {
     return c.json({ error: "bad tx hash" }, 400);
   }
+
+  const exists = await c.env.DB.prepare("SELECT id FROM stake_orders WHERE source_tx_hash = ?")
+    .bind(body.sourceTxHash)
+    .first<{ id: string }>();
+  if (exists) return c.json({ error: "tx already recorded" }, 409);
+
+  const amount = BigInt(body.amountWei);
+  const token = tokenForStakeAsset(c.env, asset);
+  await verifyVaultDeposit(c.env, {
+    txHash: body.sourceTxHash as Hex,
+    user: user as Address,
+    token,
+    amount,
+    purpose: 1,
+  });
 
   await upsertUser(c.env, user, body.referrer ?? null);
   const monthlyRateBps = await getCurrentRateBps(c.env, asset, months);
@@ -118,14 +134,16 @@ stake.post("/claim", async (c) => {
 
   if (!order) return c.json({ error: "order not found" }, 404);
   if (order.claimed) return c.json({ error: "already claimed" }, 400);
-  if (Math.floor(Date.now() / 1000) < order.matures_at) {
+  const now = await nowSeconds(c.env);
+  if (now < order.matures_at) {
     return c.json({ error: "not matured" }, 400);
   }
 
-  // 收益（USDT 等值）= 本金 * monthly_rate * months
+  // 收益（USDT 等值）= 本金 USDT 价值 * monthly_rate * months
   const principal = BigInt(order.amount);
+  const principalUsdt = await stakeAssetWeiToUsdtWei(c.env, order.asset as StakeAsset, principal);
   const yieldUsdt =
-    (principal * BigInt(order.monthly_rate_bps) * BigInt(order.lock_months)) /
+    (principalUsdt * BigInt(order.monthly_rate_bps) * BigInt(order.lock_months)) /
     BigInt(BPS_DENOMINATOR);
 
   // 取 HS 价格（USDT 计价）从 oracle 缓存读
@@ -142,42 +160,25 @@ stake.post("/claim", async (c) => {
   if (priceScaled === 0n) return c.json({ error: "hs price zero" }, 503);
   const yieldHs = (yieldUsdt * PRECISION) / priceScaled;
 
-  // 5% 燃料：用户实际拿 95%，5% 由 cron 销毁
+  // 5% 燃料由 Worker 签名绑定到 payouts，Vault 只验证列表 hash 并一次交易转完。
   const fuelHs = (yieldHs * BigInt(STAKE_FUEL_BURN_BPS)) / BigInt(BPS_DENOMINATOR);
   const userHs = yieldHs - fuelHs;
 
-  const hsToken = (c.env.HS_TOKEN || HS_TOKEN_FALLBACK) as Address;
-  const vault = c.env.VAULT_ADDRESS as Address;
-  const chainId = Number(c.env.CHAIN_ID);
-  const pk = requireSecret(c.env, "SIGNER_PRIVATE_KEY") as `0x${string}`;
-  const nonce = BigInt("0x" + ulid().slice(0, 16));
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 30 * 60);
+  const hsToken = (c.env.HS_TOKEN || HS_TOKEN_FALLBACK).toLowerCase() as Address;
   const reason = 1; // STAKE_YIELD
 
-  const signature = await signClaim(pk, chainId, vault, {
+  const claim = await createClaimSignature(c.env, {
     user: user as Address,
     token: hsToken,
-    amount: userHs,
-    nonce,
-    deadline,
+    payouts: fuelHs > 0n
+      ? [
+        { recipient: user as Address, amount: userHs },
+        { recipient: DEAD_ADDRESS, amount: fuelHs },
+      ]
+      : [{ recipient: user as Address, amount: userHs }],
     reason,
+    now,
   });
-
-  await c.env.DB.prepare(
-    `INSERT INTO claim_signatures (nonce, user, token, amount, reason, deadline, signature, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(
-      nonce.toString(),
-      user,
-      hsToken.toLowerCase(),
-      userHs.toString(),
-      reason,
-      Number(deadline),
-      signature,
-      Math.floor(Date.now() / 1000),
-    )
-    .run();
 
   // 标记订单已发签名（实际链上消费由 indexer 监听 Claimed → 写 used_at；此处先乐观更新）
   await c.env.DB.prepare("UPDATE stake_orders SET claimed = 1 WHERE id = ?")
@@ -185,12 +186,8 @@ stake.post("/claim", async (c) => {
     .run();
 
   return c.json({
-    token: hsToken,
-    amount: userHs.toString(),
+    ...claim,
+    claimableHs: userHs.toString(),
     fuelBurnHs: fuelHs.toString(),
-    nonce: nonce.toString(),
-    deadline: Number(deadline),
-    reason,
-    signature,
   });
 });

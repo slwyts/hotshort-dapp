@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { ulid } from "./ulid";
+import { nowSeconds } from "./time";
 
 /**
  * 用户首次连接钱包/下单时 upsert，确保 referral_paths 三代回填。
@@ -8,7 +9,7 @@ import { ulid } from "./ulid";
 export async function upsertUser(env: Env, address: string, referrer: string | null = null) {
   const addr = address.toLowerCase();
   const ref = referrer ? referrer.toLowerCase() : null;
-  const now = Math.floor(Date.now() / 1000);
+  const now = await nowSeconds(env);
 
   const existing = await env.DB.prepare("SELECT referrer FROM users WHERE address = ?")
     .bind(addr)
@@ -51,7 +52,7 @@ export async function rebuildReferralPath(env: Env, address: string): Promise<vo
   await env.DB.prepare(
     "INSERT OR REPLACE INTO referral_paths (user, level1, level2, level3, bound_at) VALUES (?, ?, ?, ?, ?)",
   )
-    .bind(addr, ancestors[0], ancestors[1], ancestors[2], Math.floor(Date.now() / 1000))
+    .bind(addr, ancestors[0], ancestors[1], ancestors[2], await nowSeconds(env))
     .run();
 }
 
@@ -66,7 +67,7 @@ export interface CreateStakeOrderInput {
 
 export async function createStakeOrder(env: Env, i: CreateStakeOrderInput): Promise<string> {
   const id = ulid();
-  const startedAt = Math.floor(Date.now() / 1000);
+  const startedAt = await nowSeconds(env);
   const matures = startedAt + i.lockMonths * 30 * 86400;
   await env.DB.prepare(
     `INSERT INTO stake_orders

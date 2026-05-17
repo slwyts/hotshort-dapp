@@ -1,17 +1,10 @@
-import {
-  createWalletClient,
-  http,
-  type Address,
-  type Hex,
-  keccak256,
-  encodeAbiParameters,
-} from "viem";
+import { type Address, type Hex, keccak256, encodeAbiParameters } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 export interface ClaimPayload {
   user: Address;
   token: Address;
-  amount: bigint;
+  payoutsHash: Hex;
   nonce: bigint;
   deadline: bigint;
   reason: number;
@@ -19,7 +12,7 @@ export interface ClaimPayload {
 
 const CLAIM_TYPEHASH = keccak256(
   new TextEncoder().encode(
-    "Claim(address user,address token,uint256 amount,uint256 nonce,uint256 deadline,uint8 reason)",
+    "Claim(address user,address token,bytes32 payoutsHash,uint256 nonce,uint256 deadline,uint8 reason)",
   ) as Uint8Array,
 );
 
@@ -36,7 +29,7 @@ export const CLAIM_TYPES = {
   Claim: [
     { name: "user", type: "address" },
     { name: "token", type: "address" },
-    { name: "amount", type: "uint256" },
+    { name: "payoutsHash", type: "bytes32" },
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
     { name: "reason", type: "uint8" },
@@ -53,15 +46,14 @@ export async function signClaim(
   payload: ClaimPayload,
 ): Promise<Hex> {
   const account = privateKeyToAccount(privateKey);
-  const client = createWalletClient({ account, transport: http() });
-  const sig = await client.signTypedData({
+  const sig = await account.signTypedData({
     domain: buildDomain(chainId, vault),
     types: CLAIM_TYPES,
     primaryType: "Claim",
     message: {
       user: payload.user,
       token: payload.token,
-      amount: payload.amount,
+      payoutsHash: payload.payoutsHash,
       nonce: payload.nonce,
       deadline: payload.deadline,
       reason: payload.reason,
@@ -78,12 +70,12 @@ export function claimStructHash(p: ClaimPayload): Hex {
         { type: "bytes32" },
         { type: "address" },
         { type: "address" },
-        { type: "uint256" },
+        { type: "bytes32" },
         { type: "uint256" },
         { type: "uint256" },
         { type: "uint8" },
       ],
-      [CLAIM_TYPEHASH, p.user, p.token, p.amount, p.nonce, p.deadline, p.reason],
+      [CLAIM_TYPEHASH, p.user, p.token, p.payoutsHash, p.nonce, p.deadline, p.reason],
     ),
   );
 }

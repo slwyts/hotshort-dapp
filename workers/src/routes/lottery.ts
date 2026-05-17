@@ -1,12 +1,14 @@
 import { Hono } from "hono";
-import { type Address } from "viem";
+import { type Address, type Hex } from "viem";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
 import { upsertUser } from "../lib/users";
 import { ulid } from "../lib/ulid";
-import { signClaim } from "../lib/sign";
-import { computeHit, prizeFromPool } from "../lib/lottery";
-import { requireSecret } from "../env";
+import { computeHit } from "../lib/lottery";
+import { nowSeconds } from "../lib/time";
+import { createClaimSignature } from "../lib/claims";
+import { decimalToWei, usdtWeiToHsWei } from "../lib/pricing";
+import { verifyVaultDeposit } from "../lib/vault-events";
 import { LOTTERY_TO_POOL_BPS, BPS_DENOMINATOR } from "@/lib/constants/business-rules";
 
 export const lottery = new Hono<{ Bindings: Env }>();
@@ -40,12 +42,12 @@ async function getOrCreateRound(env: Env): Promise<{ roundNo: number; pool_hs: s
   const refillHsWei = BigInt(Math.floor(Number(refill?.value ?? 100_000) * 1e18));
 
   const ticketUsdt = await getTicketPriceUsdt(env);
-  const ticketHsWei = BigInt(Math.floor(ticketUsdt * 1e18));
+  const ticketHsWei = await usdtWeiToHsWei(env, decimalToWei(ticketUsdt));
 
   await env.DB.prepare(
     "INSERT INTO lottery_rounds (round_no, ticket_price_hs, pool_hs, opened_at) VALUES (?, ?, ?, ?)",
   )
-    .bind(roundNo, ticketHsWei.toString(), refillHsWei.toString(), Math.floor(Date.now() / 1000))
+    .bind(roundNo, ticketHsWei.toString(), refillHsWei.toString(), await nowSeconds(env))
     .run();
   return { roundNo, pool_hs: refillHsWei.toString(), ticket_price_hs: ticketHsWei.toString() };
 }
@@ -100,9 +102,23 @@ lottery.post("/buy", async (c) => {
 
   await upsertUser(c.env, user, body.referrer ?? null);
   const round = await getOrCreateRound(c.env);
+  const now = await nowSeconds(c.env);
 
   // 累计 paid_hs = ticketPriceHs * count
   const paidWei = BigInt(round.ticket_price_hs) * BigInt(count);
+
+  const duplicate = await c.env.DB.prepare("SELECT id FROM lottery_tickets WHERE source_tx_hash = ? LIMIT 1")
+    .bind(body.sourceTxHash)
+    .first<{ id: string }>();
+  if (duplicate) return c.json({ error: "tx already recorded" }, 409);
+
+  await verifyVaultDeposit(c.env, {
+    txHash: body.sourceTxHash as Hex,
+    user: user as Address,
+    token: c.env.HS_TOKEN.toLowerCase() as Address,
+    amount: paidWei,
+    purpose: 3,
+  });
 
   for (let i = 0; i < count; i++) {
     const id = ulid();
@@ -110,17 +126,26 @@ lottery.post("/buy", async (c) => {
       `INSERT INTO lottery_tickets (id, round_no, user, numbers, paid_hs, bought_at, source_tx_hash)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(id, round.roundNo, user, body.numbers!, round.ticket_price_hs, Math.floor(Date.now() / 1000), body.sourceTxHash)
+      .bind(id, round.roundNo, user, body.numbers!, round.ticket_price_hs, now, body.sourceTxHash)
       .run();
   }
 
-  // 累计 70% 入奖池（30% 视为销毁，由 admin 在结算时实际转入黑洞）
+  // 累计 70% 入奖池；剩余 30% 留在 Vault 作为黑洞/金库待处理余额。
   const toPool = (paidWei * BigInt(LOTTERY_TO_POOL_BPS)) / BigInt(BPS_DENOMINATOR);
-  await c.env.DB.prepare("UPDATE lottery_rounds SET pool_hs = CAST((CAST(pool_hs AS INTEGER) + ?) AS TEXT) WHERE round_no = ?")
-    .bind(toPool.toString(), round.roundNo)
+  const poolRow = await c.env.DB.prepare("SELECT pool_hs FROM lottery_rounds WHERE round_no = ?")
+    .bind(round.roundNo)
+    .first<{ pool_hs: string }>();
+  const nextPool = BigInt(poolRow?.pool_hs ?? "0") + toPool;
+  await c.env.DB.prepare("UPDATE lottery_rounds SET pool_hs = ? WHERE round_no = ?")
+    .bind(nextPool.toString(), round.roundNo)
     .run();
 
-  return c.json({ roundNo: round.roundNo, count, paidHs: paidWei.toString(), poolAdditionHs: toPool.toString() });
+  return c.json({
+    roundNo: round.roundNo,
+    count,
+    paidHs: paidWei.toString(),
+    poolAdditionHs: toPool.toString(),
+  });
 });
 
 /** POST /lottery/claim  签名领奖（仅命中票） */
@@ -140,43 +165,22 @@ lottery.post("/claim", async (c) => {
   if (ticket.claimed) return c.json({ error: "already claimed" }, 400);
   if (!ticket.prize_hs || BigInt(ticket.prize_hs) <= 0n) return c.json({ error: "no prize" }, 400);
 
-  const hsToken = c.env.HS_TOKEN as Address;
-  const vault = c.env.VAULT_ADDRESS as Address;
-  const chainId = Number(c.env.CHAIN_ID);
-  const pk = requireSecret(c.env, "SIGNER_PRIVATE_KEY") as `0x${string}`;
-  const nonce = BigInt("0x" + ulid().slice(0, 16));
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 30 * 60);
   const reason = 3; // LOTTERY_PRIZE
   const amount = BigInt(ticket.prize_hs);
 
-  const signature = await signClaim(pk, chainId, vault, {
+  const claim = await createClaimSignature(c.env, {
     user: user as Address,
-    token: hsToken,
-    amount,
-    nonce,
-    deadline,
+    token: c.env.HS_TOKEN.toLowerCase() as Address,
+    payouts: [{ recipient: user as Address, amount }],
     reason,
+    now: await nowSeconds(c.env),
   });
-
-  await c.env.DB.prepare(
-    `INSERT INTO claim_signatures (nonce, user, token, amount, reason, deadline, signature, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(nonce.toString(), user, hsToken.toLowerCase(), amount.toString(), reason, Number(deadline), signature, Math.floor(Date.now() / 1000))
-    .run();
 
   await c.env.DB.prepare("UPDATE lottery_tickets SET claimed = 1 WHERE id = ?")
     .bind(ticket.id)
     .run();
 
-  return c.json({
-    token: hsToken,
-    amount: amount.toString(),
-    nonce: nonce.toString(),
-    deadline: Number(deadline),
-    reason,
-    signature,
-  });
+  return c.json(claim);
 });
 
 // 仅供测试与人工触发（生产由 cron 0 16 * * 0 走）

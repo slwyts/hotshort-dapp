@@ -90,7 +90,9 @@ CREATE TABLE IF NOT EXISTS lottery_rounds (
   winning_number TEXT,                       -- 6 位数字字符串
   commit_hash TEXT,                          -- 上周提前 commit 的 hash
   reveal_seed TEXT,                          -- 本周开奖时 reveal
-  block_hash TEXT                            -- 配合 future block 哈希，模拟薄饼公平性
+  block_hash TEXT,                           -- 兼容旧字段；同步薄饼后记录源摘要
+  pancake_lottery_id TEXT,                   -- 对应薄饼彩票期号
+  draw_source TEXT                           -- 'pancake:<address>' | '__test'
 );
 
 -- 彩票门票
@@ -258,4 +260,20 @@ CREATE TABLE IF NOT EXISTS burn_top10_settlements (
 CREATE INDEX IF NOT EXISTS idx_burn_top10_user ON burn_top10_settlements(user, claimed);
 CREATE INDEX IF NOT EXISTS idx_burn_top10_round ON burn_top10_settlements(round);
 CREATE INDEX IF NOT EXISTS idx_burn_records_round ON burn_records(settled_round);
+
+CREATE TABLE IF NOT EXISTS reward_claims (
+  id TEXT PRIMARY KEY,
+  user TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  reward_token TEXT NOT NULL,
+  reward_amount TEXT NOT NULL,
+  round INTEGER,
+  source_ref TEXT NOT NULL,
+  claimed INTEGER NOT NULL DEFAULT 0,
+  claim_signature_nonce TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE(user, kind, source_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_reward_claims_user ON reward_claims(user, claimed);
+CREATE INDEX IF NOT EXISTS idx_reward_claims_round ON reward_claims(round, kind);
 `;

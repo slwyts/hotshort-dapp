@@ -249,11 +249,14 @@ admin.get("/funds", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
   // 应付的签名（已签出未上链消费）
-  const pendingByToken = await c.env.DB.prepare(
-    `SELECT token, COALESCE(SUM(CAST(amount AS INTEGER)), 0) AS pending
-       FROM claim_signatures WHERE used_at IS NULL GROUP BY token`,
-  ).all<{ token: string; pending: number | string }>();
-  return c.json({ pending: pendingByToken.results ?? [] });
+  const pendingRows = await c.env.DB.prepare(
+    "SELECT token, amount FROM claim_signatures WHERE used_at IS NULL",
+  ).all<{ token: string; amount: string }>();
+  const pending = new Map<string, bigint>();
+  for (const row of pendingRows.results ?? []) {
+    pending.set(row.token, (pending.get(row.token) ?? 0n) + BigInt(row.amount));
+  }
+  return c.json({ pending: [...pending.entries()].map(([token, amount]) => ({ token, pending: amount.toString() })) });
 });
 admin.get("/agents", async (c) => {
   const owner = await requireOwner(c);

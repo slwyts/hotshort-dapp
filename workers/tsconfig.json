@@ -11,10 +11,8 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "types": ["@cloudflare/workers-types"],
-    "ignoreDeprecations": "6.0",
-    "baseUrl": "..",
     "paths": {
-      "@/lib/constants/*": ["./lib/constants/*"]
+      "@/lib/constants/*": ["../lib/constants/*"]
     }
   },
   "include": ["src/**/*.ts", "../lib/constants/**/*.ts"]

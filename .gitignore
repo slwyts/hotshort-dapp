@@ -54,3 +54,8 @@ lib/forge-std/
 # logs
 logs
 *.log
+
+# playwright
+test-results/
+playwright-report/
+blob-report/

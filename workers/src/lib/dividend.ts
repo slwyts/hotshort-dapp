@@ -2,6 +2,7 @@ import type { Env } from "../env";
 import { ulid } from "./ulid";
 import { addStock, getStockPriceUsdt } from "./stocks";
 import { recordThreeGenReferral } from "./referral";
+import { todayBeijing } from "./time";
 import {
   AI_DIVIDEND_TIER_SHARE_BPS,
   BPS_DENOMINATOR,
@@ -29,10 +30,6 @@ async function readConfig(env: Env): Promise<ConfigSnapshot> {
   };
 }
 
-function todayBeijing(): string {
-  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
-}
-
 /**
  * §2.2 每日股票分红 cron
  *   1) 当日交易额 = 在 [volumeMin, volumeMax] 区间随机
@@ -43,7 +40,7 @@ function todayBeijing(): string {
  *   6) §2.4(2) 每个用户份额触发三代返佣（按其购买的最高档作 buyerTier）
  */
 export async function settleAiDividend(env: Env): Promise<{ date: string; totalStock: string; recipients: number } | null> {
-  const date = todayBeijing();
+  const date = await todayBeijing(env);
   const exists = await env.DB.prepare(
     "SELECT settled FROM ai_dividend_pool_daily WHERE date = ?",
   )
@@ -102,18 +99,21 @@ export async function settleAiDividend(env: Env): Promise<{ date: string; totalS
       const share = (tierPoolStockWei * usdt) / totalUsdt;
       if (share <= 0n) continue;
 
-      // 写 ai_dividend_user_daily（同一用户多档时合并 stock_share）
-      await env.DB.prepare(
-        `INSERT INTO ai_dividend_user_daily (date, user, tier, stock_share)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(date, user) DO UPDATE SET stock_share = CAST(stock_share AS INTEGER) + excluded.stock_share`,
+      const existing = await env.DB.prepare(
+        "SELECT stock_share FROM ai_dividend_user_daily WHERE date = ? AND user = ?",
       )
-        .bind(date, user, tier, share.toString())
+        .bind(date, user)
+        .first<{ stock_share: string }>();
+      const mergedShare = BigInt(existing?.stock_share ?? "0") + share;
+      await env.DB.prepare(
+        `INSERT OR REPLACE INTO ai_dividend_user_daily (date, user, tier, stock_share, claimed)
+         VALUES (?, ?, ?, ?, COALESCE((SELECT claimed FROM ai_dividend_user_daily WHERE date = ? AND user = ?), 0))`,
+      )
+        .bind(date, user, tier, mergedShare.toString(), date, user)
         .run();
 
       // 三代返佣（基数为该用户份额的 USDT 等值）
-      const shareUsdt = (share * BigInt(Math.floor(stockPrice * 1e18))) / 10n ** 36n;
-      // 上面除法用 1e36 是因为 share 已经是 1e18，stockPrice 又乘了 1e18
+      const shareUsdt = (share * BigInt(Math.floor(stockPrice * 1e18))) / 10n ** 18n;
       await recordThreeGenReferral(env, {
         source: user,
         date,

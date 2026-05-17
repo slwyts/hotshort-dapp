@@ -12,6 +12,8 @@ export interface Env {
   HS_TOKEN: string;
   USDT_TOKEN: string;
   PANCAKE_PAIR: string;
+  PANCAKE_LOTTERY_ADDRESS?: string;
+  E2E_TEST_MODE?: string;
 
   // secrets
   SIGNER_PRIVATE_KEY?: string;

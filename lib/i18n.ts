@@ -166,11 +166,14 @@ const zh = {
   "ai.div.airdropBoost": "燃烧加成",
   "ai.div.airdropBoostHint": "分享全网燃烧池",
   "ai.div.weeklyHint": "HS 空投每周一发放，与燃烧排行榜同步",
+  "ai.div.claimAirdrop": "领取 HS 空投",
   "ai.div.connect": "连接钱包查看你的分红",
   "ai.div.noClaim.title": "暂无可领",
   "ai.div.noClaim.body": "今日暂无分红或团队奖励",
   "ai.div.claimSuccess.title": "领取成功",
   "ai.div.claimSuccess.body": "已入账 {amount} 股股票（含团队奖励）",
+  "ai.div.airdropClaimSuccess.title": "空投领取成功",
+  "ai.div.airdropClaimSuccess.body": "已收到 {amount} HS（{tx}）",
 
   // ===== AI 兑换 =====
   "ai.swap.cardTitle": "兑换股票",
@@ -516,11 +519,14 @@ const en: Record<string, string> = {
   "ai.div.airdropBoost": "Burn boost",
   "ai.div.airdropBoostHint": "Share global burn pool",
   "ai.div.weeklyHint": "HS airdrop is paid every Monday with the burn leaderboard",
+  "ai.div.claimAirdrop": "Claim HS airdrop",
   "ai.div.connect": "Connect wallet to see your dividend",
   "ai.div.noClaim.title": "Nothing to claim",
   "ai.div.noClaim.body": "No dividend or team rewards today",
   "ai.div.claimSuccess.title": "Claimed",
   "ai.div.claimSuccess.body": "Credited {amount} stocks (incl. team rewards)",
+  "ai.div.airdropClaimSuccess.title": "Airdrop claimed",
+  "ai.div.airdropClaimSuccess.body": "Received {amount} HS ({tx})",
 
   // ===== AI Swap =====
   "ai.swap.cardTitle": "Swap to stocks",

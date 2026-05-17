@@ -30,6 +30,7 @@ contract HotshortVault {
     error NonceUsed();
     error Expired();
     error BadSignature();
+    error BadPayouts();
     error TransferFailed();
 
     // --- Events ---
@@ -50,7 +51,7 @@ contract HotshortVault {
 
     // EIP-712
     bytes32 public constant CLAIM_TYPEHASH = keccak256(
-        "Claim(address user,address token,uint256 amount,uint256 nonce,uint256 deadline,uint8 reason)"
+        "Claim(address user,address token,bytes32 payoutsHash,uint256 nonce,uint256 deadline,uint8 reason)"
     );
     bytes32 private immutable _DOMAIN_SEPARATOR;
 
@@ -102,7 +103,8 @@ contract HotshortVault {
     /**
      * @notice 凭 Worker 签名领取奖励/本金/分红。
      * @param token     ERC20 地址
-     * @param amount    数额
+    * @param recipients 收款地址列表，由 Worker 签名绑定
+    * @param amounts   对应收款金额列表，由 Worker 签名绑定
      * @param nonce     全局唯一 nonce（Worker 维护，禁止重放）
      * @param deadline  签名截止时间（unix 秒）
      * @param reason    1=stake-yield 2=stock-dividend 3=lottery-prize 4=burn-dividend
@@ -111,18 +113,20 @@ contract HotshortVault {
      */
     function claim(
         address token,
-        uint256 amount,
+        address[] calldata recipients,
+        uint256[] calldata amounts,
         uint256 nonce,
         uint256 deadline,
         uint8 reason,
         bytes calldata sig
     ) external whenNotPaused {
-        if (amount == 0) revert ZeroAmount();
+        if (recipients.length == 0 || recipients.length != amounts.length) revert BadPayouts();
         if (block.timestamp > deadline) revert Expired();
         if (usedNonces[nonce]) revert NonceUsed();
 
+        bytes32 payoutsHash = keccak256(abi.encode(recipients, amounts));
         bytes32 structHash = keccak256(
-            abi.encode(CLAIM_TYPEHASH, msg.sender, token, amount, nonce, deadline, reason)
+            abi.encode(CLAIM_TYPEHASH, msg.sender, token, payoutsHash, nonce, deadline, reason)
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _DOMAIN_SEPARATOR, structHash));
 
@@ -130,10 +134,15 @@ contract HotshortVault {
         if (recovered == address(0) || recovered != signer) revert BadSignature();
 
         usedNonces[nonce] = true;
-        bool ok = IERC20(token).transfer(msg.sender, amount);
-        if (!ok) revert TransferFailed();
+        uint256 total;
+        for (uint256 i = 0; i < recipients.length; i++) {
+            if (recipients[i] == address(0) || amounts[i] == 0) revert BadPayouts();
+            total += amounts[i];
+            bool ok = IERC20(token).transfer(recipients[i], amounts[i]);
+            if (!ok) revert TransferFailed();
+        }
 
-        emit Claimed(msg.sender, token, amount, reason, nonce);
+        emit Claimed(msg.sender, token, total, reason, nonce);
     }
 
     // --- 闪兑：HS -> 锁仓 2 年股票（链上仅记录入金，股票账本由 Worker 维护） ---

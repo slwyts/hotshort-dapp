@@ -11,6 +11,7 @@ import { burn } from "./routes/burn";
 import { referral } from "./routes/referral";
 import { portfolio } from "./routes/portfolio";
 import { admin } from "./routes/admin";
+import { testControl } from "./routes/test-control";
 import { runCron } from "./cron";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -26,6 +27,7 @@ app.route("/burn", burn);
 app.route("/referral", referral);
 app.route("/portfolio", portfolio);
 app.route("/admin", admin);
+app.route("/__test", testControl);
 
 app.notFound((c) => c.json({ error: "not found" }, 404));
 app.onError((err, c) => {

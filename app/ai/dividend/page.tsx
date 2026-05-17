@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useWriteContract } from "wagmi";
 import { formatUnits } from "viem";
 import { Loader2, Sparkles, Award } from "lucide-react";
 import Swal from "sweetalert2";
@@ -12,6 +12,8 @@ import { AiSubnav } from "@/components/ai-subnav";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
+import { VAULT_ABI } from "@/lib/contracts/abis";
+import { HOTSHORT_VAULT } from "@/lib/contracts/addresses";
 import { formatNumber } from "@/lib/utils";
 import {
   AI_AIRDROP_MIN_DAILY_STOCK,
@@ -30,10 +32,12 @@ interface DividendResponse {
 export default function DividendPage() {
   const { isConnected } = useAccount();
   const { jwt, signIn } = useSiweJwt();
+  const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
   const [data, setData] = useState<DividendResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [claiming, setClaiming] = useState(false);
+  const [claimingAirdrop, setClaimingAirdrop] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!isConnected) return;
@@ -95,6 +99,54 @@ export default function DividendPage() {
       });
     } finally {
       setClaiming(false);
+    }
+  };
+
+  const claimAirdrop = async () => {
+    const token = jwt ?? (await signIn());
+    if (!token) return;
+    setClaimingAirdrop(true);
+    try {
+      const sig = await api.post<{
+        token?: string | null;
+        recipients?: string[];
+        amounts?: string[];
+        amount: string;
+        nonce?: string;
+        deadline?: number;
+        reason?: number;
+        signature?: string;
+      }>(endpoints.aiAirdropClaim, {}, token);
+      if (!sig.signature || !sig.token || sig.amount === "0") {
+        await Swal.fire({ icon: "info", title: t("ai.div.noClaim.title"), text: t("ai.div.noClaim.body"), background: "#141419", color: "#fff" });
+        return;
+      }
+      const txHash = await writeContractAsync({
+        address: HOTSHORT_VAULT as `0x${string}`,
+        abi: VAULT_ABI,
+        functionName: "claim",
+        args: [
+          sig.token as `0x${string}`,
+          sig.recipients as `0x${string}`[],
+          sig.amounts!.map((amount) => BigInt(amount)),
+          BigInt(sig.nonce!),
+          BigInt(sig.deadline!),
+          sig.reason!,
+          sig.signature as `0x${string}`,
+        ],
+      });
+      await Swal.fire({
+        icon: "success",
+        title: t("ai.div.airdropClaimSuccess.title"),
+        html: t("ai.div.airdropClaimSuccess.body", { amount: formatNumber(Number(formatUnits(BigInt(sig.amount), 18)), 2), tx: txHash.slice(0, 10) }),
+        background: "#141419",
+        color: "#fff",
+        confirmButtonColor: "#b829ff",
+      });
+    } catch (e) {
+      await Swal.fire({ icon: "error", title: t("error.title"), text: (e as Error).message, background: "#141419", color: "#fff" });
+    } finally {
+      setClaimingAirdrop(false);
     }
   };
 
@@ -199,6 +251,9 @@ export default function DividendPage() {
           <p className="text-[11px] text-white/30">
             {t("ai.div.weeklyHint")}
           </p>
+          <Button onClick={claimAirdrop} disabled={claimingAirdrop || !unlocked} className="w-full">
+            {claimingAirdrop ? <Loader2 className="h-4 w-4 animate-spin" /> : t("ai.div.claimAirdrop")}
+          </Button>
         </CardContent>
       </Card>
     </PageShell>

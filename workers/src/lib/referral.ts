@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { ulid } from "./ulid";
+import { nowSeconds } from "./time";
 import {
   AI_REFERRAL_DIRECT_BPS,
   AI_REFERRAL_3GEN_BPS,
@@ -71,6 +72,7 @@ export async function recordDirectReferral(env: Env, params: {
 
   const reward = (usdtIn * BigInt(bps)) / BigInt(BPS_DENOMINATOR);
   if (reward <= 0n) return;
+  const now = await nowSeconds(env);
 
   await env.DB.prepare(
     `INSERT INTO referral_rewards
@@ -84,7 +86,7 @@ export async function recordDirectReferral(env: Env, params: {
       reward.toString(),
       usdtIn.toString(),
       orderId,
-      Math.floor(Date.now() / 1000),
+      now,
     )
     .run();
 }
@@ -103,6 +105,7 @@ export async function recordThreeGenReferral(env: Env, params: {
   const path = await getPath(env, params.source);
   const ancestors: (string | null)[] = [path.level1, path.level2, path.level3];
   const sourceScore = TIER_PRIORITY[params.buyerTier];
+  const now = await nowSeconds(env);
 
   for (let i = 0; i < 3; i++) {
     const upper = ancestors[i];
@@ -133,7 +136,7 @@ export async function recordThreeGenReferral(env: Env, params: {
         reward.toString(),
         params.stockShareUsdt.toString(),
         params.date,
-        Math.floor(Date.now() / 1000),
+        now,
       )
       .run();
   }
