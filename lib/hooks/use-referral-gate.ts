@@ -16,7 +16,7 @@ interface MeResp {
  * 下单 / 燃烧 / 抽奖等动作前调用 ensureBound() 校验：
  *   - 已连接 + 已绑定上级 → 返回 true
  *   - 未连接 → false（调用方负责提示连接钱包）
- *   - 已连接但未绑定 → 弹 1s 悬浮提示后跳转 /me?tab=invite，返回 false
+ *   - 已连接但未绑定 → 弹 1s 悬浮提示后跳转 /me?tab=assets（绑定卡在资产页），返回 false
  */
 export function useReferralGate() {
   const { isConnected } = useAccount();
