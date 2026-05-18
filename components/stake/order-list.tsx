@@ -10,7 +10,7 @@ import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { VAULT_ABI } from "@/lib/contracts/abis";
-import { HOTSHORT_VAULT } from "@/lib/contracts/addresses";
+import { useContracts } from "@/lib/runtime-config";
 import { bpsToPercent } from "@/lib/constants/business-rules";
 import { cn, formatNumber, shortenAddress } from "@/lib/utils";
 import { formatUnits } from "viem";interface StakeOrder {
@@ -33,6 +33,7 @@ export function OrderList({ refreshKey }: { refreshKey: number }) {
   const [orders, setOrders] = useState<StakeOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const { writeContractAsync } = useWriteContract();
+  const { vault } = useContracts();
   const refresh = useCallback(async () => {
     if (!isConnected || !address) return;
     let token = jwt;
@@ -86,7 +87,7 @@ export function OrderList({ refreshKey }: { refreshKey: number }) {
         didOpen: () => Swal.showLoading(),
       });
       const txHash = await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "claim",
         args: [

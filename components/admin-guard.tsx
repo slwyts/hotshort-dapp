@@ -2,16 +2,17 @@
 
 import { useAccount, useReadContract } from "wagmi";
 import { Shield, Loader2 } from "lucide-react";
-import { HOTSHORT_VAULT } from "@/lib/contracts/addresses";
+import { useContracts } from "@/lib/runtime-config";
 import { VAULT_ABI } from "@/lib/contracts/abis";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConnectButton } from "@/components/connect-button";
 
 export function AdminGuard({ children }: { children: React.ReactNode }) {
   const { address, isConnected } = useAccount();
+  const { vault } = useContracts();
   const { data: onchainOwner, isLoading } = useReadContract({
     abi: VAULT_ABI,
-    address: HOTSHORT_VAULT,
+    address: vault,
     functionName: "owner",
     query: { enabled: isConnected },
   });

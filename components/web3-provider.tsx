@@ -1,9 +1,10 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { State, WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { config } from "@/lib/web3";
+import { buildWagmiConfig } from "@/lib/web3";
+import { RuntimeConfigProvider, type RuntimeConfig } from "@/lib/runtime-config";
 import { NetworkSwitcher } from "./network-switcher";
 
 const queryClient = new QueryClient({
@@ -18,17 +19,23 @@ const queryClient = new QueryClient({
 
 export function Web3Provider({
   children,
+  initialConfig,
   initialState,
 }: {
   children: ReactNode;
+  initialConfig: RuntimeConfig;
   initialState?: State;
 }) {
+  const wagmiConfig = useMemo(() => buildWagmiConfig(initialConfig), [initialConfig]);
+
   return (
-    <WagmiProvider config={config} initialState={initialState}>
-      <QueryClientProvider client={queryClient}>
-        <NetworkSwitcher />
-        {children}
-      </QueryClientProvider>
-    </WagmiProvider>
+    <RuntimeConfigProvider value={initialConfig}>
+      <WagmiProvider config={wagmiConfig} initialState={initialState}>
+        <QueryClientProvider client={queryClient}>
+          <NetworkSwitcher />
+          {children}
+        </QueryClientProvider>
+      </WagmiProvider>
+    </RuntimeConfigProvider>
   );
 }

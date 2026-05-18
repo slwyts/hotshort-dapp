@@ -19,7 +19,6 @@ import {
 
 export const stake = new Hono<{ Bindings: Env }>();
 
-const HS_TOKEN_FALLBACK = "0xcf4907621f0d9803c7288423b4303226b696b533";
 const DEAD_ADDRESS = "0x000000000000000000000000000000000000dEaD" as Address;
 
 /**
@@ -164,7 +163,7 @@ stake.post("/claim", async (c) => {
   const fuelHs = (yieldHs * BigInt(STAKE_FUEL_BURN_BPS)) / BigInt(BPS_DENOMINATOR);
   const userHs = yieldHs - fuelHs;
 
-  const hsToken = (c.env.HS_TOKEN || HS_TOKEN_FALLBACK).toLowerCase() as Address;
+  const hsToken = c.env.HS_TOKEN.toLowerCase() as Address;
   const reason = 1; // STAKE_YIELD
 
   const claim = await createClaimSignature(c.env, {

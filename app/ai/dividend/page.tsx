@@ -13,7 +13,7 @@ import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { VAULT_ABI } from "@/lib/contracts/abis";
-import { HOTSHORT_VAULT } from "@/lib/contracts/addresses";
+import { useContracts } from "@/lib/runtime-config";
 import { formatNumber } from "@/lib/utils";
 import {
   AI_AIRDROP_MIN_DAILY_STOCK,
@@ -34,6 +34,7 @@ export default function DividendPage() {
   const { jwt, signIn } = useSiweJwt();
   const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
+  const { vault } = useContracts();
   const [data, setData] = useState<DividendResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [claiming, setClaiming] = useState(false);
@@ -122,7 +123,7 @@ export default function DividendPage() {
         return;
       }
       const txHash = await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "claim",
         args: [

@@ -24,7 +24,7 @@ import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI } from "@/lib/contracts/abis";
-import { HS_TOKEN, USDT_TOKEN, PANCAKE_PAIR_HS_USDT } from "@/lib/contracts/addresses";
+import { useContracts } from "@/lib/runtime-config";
 import { formatNumber, cn } from "@/lib/utils";
 
 interface Portfolio {
@@ -42,6 +42,7 @@ export default function HomePage() {
   const { address, isConnected } = useAccount();
   const { jwt, signIn } = useSiweJwt();
   const { t } = useLocale();
+  const { hsToken, usdtToken, pancakePair } = useContracts();
   const [hsPrice, setHsPrice] = useState<number | null>(null);
   const [poolHs, setPoolHs] = useState<number | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
@@ -51,21 +52,21 @@ export default function HomePage() {
   // 钱包余额
   const { data: usdtBal } = useReadContract({
     abi: ERC20_ABI,
-    address: USDT_TOKEN as `0x${string}`,
+    address: usdtToken,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address, refetchInterval: 30_000 },
   });
   const { data: hsBal } = useReadContract({
     abi: ERC20_ABI,
-    address: HS_TOKEN as `0x${string}`,
+    address: hsToken,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address, refetchInterval: 30_000 },
   });
   const { data: lpBal } = useReadContract({
     abi: ERC20_ABI,
-    address: PANCAKE_PAIR_HS_USDT as `0x${string}`,
+    address: pancakePair,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address, refetchInterval: 30_000 },

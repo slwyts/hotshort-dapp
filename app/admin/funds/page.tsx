@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
-import { HOTSHORT_VAULT, HS_TOKEN, USDT_TOKEN, PANCAKE_PAIR_HS_USDT } from "@/lib/contracts/addresses";
+import { useContracts } from "@/lib/runtime-config";
 import { formatNumber, shortenAddress } from "@/lib/utils";
 
 interface PendingRow {
@@ -25,39 +25,40 @@ export default function AdminFundsPage() {
   const { jwt, signIn } = useSiweJwt();
   const { writeContractAsync } = useWriteContract();
   const [pending, setPending] = useState<PendingRow[]>([]);
+  const { vault, hsToken, usdtToken, pancakePair } = useContracts();
 
-  const vaultDeployed = HOTSHORT_VAULT !== "0x0000000000000000000000000000000000000000";
+  const vaultDeployed = vault !== "0x0000000000000000000000000000000000000000";
 
   const { data: vaultUsdt } = useReadContract({
     abi: ERC20_ABI,
-    address: USDT_TOKEN as `0x${string}`,
+    address: usdtToken,
     functionName: "balanceOf",
-    args: vaultDeployed ? [HOTSHORT_VAULT as `0x${string}`] : undefined,
+    args: vaultDeployed ? [vault] : undefined,
     query: { enabled: vaultDeployed },
   });
   const { data: vaultHs } = useReadContract({
     abi: ERC20_ABI,
-    address: HS_TOKEN as `0x${string}`,
+    address: hsToken,
     functionName: "balanceOf",
-    args: vaultDeployed ? [HOTSHORT_VAULT as `0x${string}`] : undefined,
+    args: vaultDeployed ? [vault] : undefined,
     query: { enabled: vaultDeployed },
   });
   const { data: vaultLp } = useReadContract({
     abi: ERC20_ABI,
-    address: PANCAKE_PAIR_HS_USDT as `0x${string}`,
+    address: pancakePair,
     functionName: "balanceOf",
-    args: vaultDeployed ? [HOTSHORT_VAULT as `0x${string}`] : undefined,
+    args: vaultDeployed ? [vault] : undefined,
     query: { enabled: vaultDeployed },
   });
   const { data: pausedFlag } = useReadContract({
     abi: VAULT_ABI,
-    address: HOTSHORT_VAULT as `0x${string}`,
+    address: vault,
     functionName: "paused",
     query: { enabled: vaultDeployed, refetchInterval: 30_000 },
   });
   const { data: signerAddr } = useReadContract({
     abi: VAULT_ABI,
-    address: HOTSHORT_VAULT as `0x${string}`,
+    address: vault,
     functionName: "signer",
     query: { enabled: vaultDeployed, refetchInterval: 30_000 },
   });
@@ -89,7 +90,7 @@ export default function AdminFundsPage() {
     if (!c.isConfirmed) return;
     try {
       await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "setPaused",
         args: [target],
@@ -121,7 +122,7 @@ export default function AdminFundsPage() {
     if (!r.isConfirmed) return;
     try {
       await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "setSigner",
         args: [r.value as `0x${string}`],
@@ -162,7 +163,7 @@ export default function AdminFundsPage() {
     try {
       const amountWei = parseUnits(String(r.value.amt), 18);
       await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "withdrawTo",
         args: [token, r.value.to as `0x${string}`, amountWei],
@@ -195,13 +196,13 @@ export default function AdminFundsPage() {
             <CardHeader>
               <CardTitle>Vault 余额</CardTitle>
               <p className="text-xs text-white/40 font-mono">
-                {vaultDeployed ? shortenAddress(HOTSHORT_VAULT, 8) : "合约未部署"}
+                {vaultDeployed ? shortenAddress(vault, 8) : "合约未部署"}
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
-              <BalanceRow label="USDT" value={formatNumber(usdtNum, 2)} action={() => withdraw(USDT_TOKEN as `0x${string}`, "USDT")} />
-              <BalanceRow label="HS" value={formatNumber(hsNum, 2)} action={() => withdraw(HS_TOKEN as `0x${string}`, "HS")} />
-              <BalanceRow label="LP" value={formatNumber(lpNum, 4)} action={() => withdraw(PANCAKE_PAIR_HS_USDT as `0x${string}`, "LP")} />
+              <BalanceRow label="USDT" value={formatNumber(usdtNum, 2)} action={() => withdraw(usdtToken, "USDT")} />
+              <BalanceRow label="HS" value={formatNumber(hsNum, 2)} action={() => withdraw(hsToken, "HS")} />
+              <BalanceRow label="LP" value={formatNumber(lpNum, 4)} action={() => withdraw(pancakePair, "LP")} />
             </CardContent>
           </Card>
 

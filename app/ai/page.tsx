@@ -14,7 +14,8 @@ import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
-import { HOTSHORT_VAULT, USDT_TOKEN, DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
+import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
+import { useContracts } from "@/lib/runtime-config";
 import { AI_TIERS, BPS_DENOMINATOR, type AiTierKey } from "@/lib/constants/business-rules";
 import { formatNumber } from "@/lib/utils";
 import { getStoredReferrer } from "@/components/referral-handler";
@@ -32,11 +33,12 @@ export default function AiPage() {
   const { jwt, signIn } = useSiweJwt();
   const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
+  const { vault, usdtToken } = useContracts();
   const [pending, setPending] = useState<AiTierKey | null>(null);
 
   const { data: usdtBal } = useReadContract({
     abi: ERC20_ABI,
-    address: USDT_TOKEN as `0x${string}`,
+    address: usdtToken,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address, refetchInterval: 30_000 },
@@ -48,7 +50,7 @@ export default function AiPage() {
       await Swal.fire({ icon: "warning", title: t("common.connectFirst"), background: "#141419", color: "#fff" });
       return;
     }
-    if (HOTSHORT_VAULT === "0x0000000000000000000000000000000000000000") {
+    if (vault === "0x0000000000000000000000000000000000000000") {
       await Swal.fire({ icon: "info", title: t("ai.notReady"), text: t("ai.notReady.text"), background: "#141419", color: "#fff" });
       return;
     }
@@ -83,10 +85,10 @@ export default function AiPage() {
         didOpen: () => Swal.showLoading(),
       });
       await writeContractAsync({
-        address: USDT_TOKEN as `0x${string}`,
+        address: usdtToken,
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [HOTSHORT_VAULT as `0x${string}`, amountWei],
+        args: [vault, amountWei],
       });
 
       Swal.fire({
@@ -98,10 +100,10 @@ export default function AiPage() {
       });
       const ref = keccak256(toHex(`ai|${address}|${tier}|${Date.now()}`));
       const txHash = await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "deposit",
-        args: [USDT_TOKEN as `0x${string}`, amountWei, DEPOSIT_PURPOSE.AI_PACKAGE, ref],
+        args: [usdtToken, amountWei, DEPOSIT_PURPOSE.AI_PACKAGE, ref],
       });
 
       await api.post(

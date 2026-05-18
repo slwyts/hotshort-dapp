@@ -13,7 +13,8 @@ import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
-import { HOTSHORT_VAULT, HS_TOKEN, DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
+import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
+import { useContracts } from "@/lib/runtime-config";
 import { LOTTERY_PRIZE_BPS, bpsToPercent } from "@/lib/constants/business-rules";
 import { formatNumber, shortenAddress, cn } from "@/lib/utils";
 import { getStoredReferrer } from "@/components/referral-handler";
@@ -50,6 +51,7 @@ export default function LotteryPage() {
   const { jwt, signIn } = useSiweJwt();
   const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
+  const { vault, hsToken } = useContracts();
   const [data, setData] = useState<Round | null>(null);
   const [loading, setLoading] = useState(false);
   const [numbers, setNumbers] = useState(randomNumbers());
@@ -96,10 +98,10 @@ export default function LotteryPage() {
         didOpen: () => Swal.showLoading(),
       });
       await writeContractAsync({
-        address: HS_TOKEN as `0x${string}`,
+        address: hsToken,
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [HOTSHORT_VAULT as `0x${string}`, totalHsWei],
+        args: [vault, totalHsWei],
       });
 
       Swal.fire({
@@ -111,10 +113,10 @@ export default function LotteryPage() {
       });
       const ref = keccak256(toHex(`lottery|${address}|${numbers}|${data.current.roundNo}|${Date.now()}`));
       const txHash = await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "deposit",
-        args: [HS_TOKEN as `0x${string}`, totalHsWei, DEPOSIT_PURPOSE.LOTTERY, ref],
+        args: [hsToken, totalHsWei, DEPOSIT_PURPOSE.LOTTERY, ref],
       });
 
       await api.post(
@@ -163,7 +165,7 @@ export default function LotteryPage() {
       }>(endpoints.lotteryClaim, { ticketId }, token);
       Swal.fire({ title: t("lot.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const txHash = await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "claim",
         args: [

@@ -10,7 +10,7 @@ import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI } from "@/lib/contracts/abis";
-import { HS_TOKEN, USDT_TOKEN, PANCAKE_PAIR_HS_USDT } from "@/lib/contracts/addresses";
+import { useContracts } from "@/lib/runtime-config";
 import { formatNumber } from "@/lib/utils";
 import { ReferrerBindCard } from "@/components/me/referrer-bind-card";
 
@@ -32,36 +32,39 @@ interface Portfolio {
   stockPriceUsdt: number;
 }
 
-const TOKENS = [
-  { key: "USDT", color: "#22c55e", address: USDT_TOKEN, descKey: "asset.usdt.desc" },
-  { key: "HS", color: "#b829ff", address: HS_TOKEN, descKey: "asset.hs.desc" },
-  { key: "LP", color: "#00c6ff", address: PANCAKE_PAIR_HS_USDT, descKey: "asset.lp.desc" },
-] as const;
+type TokenKey = "USDT" | "HS" | "LP";
 
 export function AssetsSection() {
   const { address, isConnected } = useAccount();
   const { jwt, signIn } = useSiweJwt();
   const { t } = useLocale();
+  const { hsToken, usdtToken, pancakePair } = useContracts();
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const TOKENS: { key: TokenKey; color: string; address: `0x${string}`; descKey: string }[] = [
+    { key: "USDT", color: "#22c55e", address: usdtToken, descKey: "asset.usdt.desc" },
+    { key: "HS", color: "#b829ff", address: hsToken, descKey: "asset.hs.desc" },
+    { key: "LP", color: "#00c6ff", address: pancakePair, descKey: "asset.lp.desc" },
+  ];
+
   const { data: usdtBal } = useReadContract({
     abi: ERC20_ABI,
-    address: USDT_TOKEN as `0x${string}`,
+    address: usdtToken,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address, refetchInterval: 30_000 },
   });
   const { data: hsBal } = useReadContract({
     abi: ERC20_ABI,
-    address: HS_TOKEN as `0x${string}`,
+    address: hsToken,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address, refetchInterval: 30_000 },
   });
   const { data: lpBal } = useReadContract({
     abi: ERC20_ABI,
-    address: PANCAKE_PAIR_HS_USDT as `0x${string}`,
+    address: pancakePair,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address, refetchInterval: 30_000 },
@@ -190,7 +193,7 @@ export function AssetsSection() {
   );
 }
 
-function TokenIcon({ token }: { token: (typeof TOKENS)[number]["key"] }) {
+function TokenIcon({ token }: { token: TokenKey }) {
   if (token === "HS") {
     return (
       <div className="relative h-8 w-8 overflow-hidden rounded-full border border-[#f7d56a]/50 bg-white shadow-[0_0_18px_rgba(184,41,255,0.28)]">

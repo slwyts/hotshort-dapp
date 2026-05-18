@@ -7,7 +7,11 @@ export interface Env {
 
   // vars
   CHAIN_ID: string;
+  CHAIN_NAME: string;
   RPC_URL: string;
+  BLOCK_EXPLORER_URL: string;
+  NATIVE_CURRENCY_NAME: string;
+  NATIVE_CURRENCY_SYMBOL: string;
   VAULT_ADDRESS: string;
   HS_TOKEN: string;
   USDT_TOKEN: string;

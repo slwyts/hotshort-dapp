@@ -10,13 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useLocale } from "@/components/locale-provider";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
-import {
-  HOTSHORT_VAULT,
-  HS_TOKEN,
-  USDT_TOKEN,
-  PANCAKE_PAIR_HS_USDT,
-  DEPOSIT_PURPOSE,
-} from "@/lib/contracts/addresses";
+import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
+import { useContracts } from "@/lib/runtime-config";
 import {
   STAKE_ASSETS,
   STAKE_LOCK_MONTHS,
@@ -26,12 +21,6 @@ import {
   type StakeLockMonths,
 } from "@/lib/constants/business-rules";
 import { cn } from "@/lib/utils";
-
-const ASSET_TOKEN: Record<StakeAsset, `0x${string}`> = {
-  USDT: USDT_TOKEN as `0x${string}`,
-  HS: HS_TOKEN as `0x${string}`,
-  LP: PANCAKE_PAIR_HS_USDT as `0x${string}`,
-};
 
 interface StakeFormProps {
   /** 已发送 deposit 后的回调，把 txHash 传出去入库 */
@@ -47,6 +36,13 @@ export function StakeForm({ onDeposited }: StakeFormProps) {
   const { address, isConnected } = useAccount();
   const { t } = useLocale();
   const { writeContractAsync } = useWriteContract();
+  const { vault, hsToken, usdtToken, pancakePair } = useContracts();
+
+  const ASSET_TOKEN: Record<StakeAsset, `0x${string}`> = {
+    USDT: usdtToken,
+    HS: hsToken,
+    LP: pancakePair,
+  };
 
   const [asset, setAsset] = useState<StakeAsset>("USDT");
   const [lockMonths, setLockMonths] = useState<StakeLockMonths>(3);
@@ -61,7 +57,7 @@ export function StakeForm({ onDeposited }: StakeFormProps) {
       await swalError(t("common.connectFirst"));
       return;
     }
-    if (HOTSHORT_VAULT === "0x0000000000000000000000000000000000000000") {
+    if (vault === "0x0000000000000000000000000000000000000000") {
       await swalError(t("common.coming"));
       return;
     }
@@ -88,7 +84,7 @@ export function StakeForm({ onDeposited }: StakeFormProps) {
         address: token,
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [HOTSHORT_VAULT as `0x${string}`, amountWei],
+        args: [vault, amountWei],
       });
 
       // 2) deposit
@@ -104,7 +100,7 @@ export function StakeForm({ onDeposited }: StakeFormProps) {
         toHex(`stake|${address}|${asset}|${lockMonths}|${Date.now()}`),
       );
       const txHash = await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "deposit",
         args: [token, amountWei, DEPOSIT_PURPOSE.STAKE, ref],

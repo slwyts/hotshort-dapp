@@ -14,7 +14,8 @@ import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
-import { HOTSHORT_VAULT, HS_TOKEN, DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
+import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
+import { useContracts } from "@/lib/runtime-config";
 import { AI_SWAP_LOCK_SECONDS } from "@/lib/constants/business-rules";
 import { formatNumber } from "@/lib/utils";
 
@@ -23,6 +24,7 @@ export default function SwapPage() {
   const { jwt, signIn } = useSiweJwt();
   const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
+  const { vault, hsToken } = useContracts();
   const [hs, setHs] = useState("100");
   const [submitting, setSubmitting] = useState(false);
   const [hsPrice, setHsPrice] = useState<number | null>(null);
@@ -30,7 +32,7 @@ export default function SwapPage() {
 
   const { data: hsBal } = useReadContract({
     abi: ERC20_ABI,
-    address: HS_TOKEN as `0x${string}`,
+    address: hsToken,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address, refetchInterval: 30_000 },
@@ -74,10 +76,10 @@ export default function SwapPage() {
         didOpen: () => Swal.showLoading(),
       });
       await writeContractAsync({
-        address: HS_TOKEN as `0x${string}`,
+        address: hsToken,
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [HOTSHORT_VAULT as `0x${string}`, amountWei],
+        args: [vault, amountWei],
       });
 
       Swal.fire({
@@ -89,10 +91,10 @@ export default function SwapPage() {
       });
       const ref = keccak256(toHex(`swap|${address}|${Date.now()}`));
       const txHash = await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "deposit",
-        args: [HS_TOKEN as `0x${string}`, amountWei, DEPOSIT_PURPOSE.SWAP_HS_TO_STOCK, ref],
+        args: [hsToken, amountWei, DEPOSIT_PURPOSE.SWAP_HS_TO_STOCK, ref],
       });
 
       await api.post(endpoints.aiSwap, { sourceTxHash: txHash, hsAmountWei: amountWei.toString() }, token);

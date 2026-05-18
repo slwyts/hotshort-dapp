@@ -2,19 +2,19 @@
 
 import { useEffect } from "react";
 import { useAccount, useSwitchChain } from "wagmi";
-import { config } from "@/lib/web3";
+import { useChainInfo } from "@/lib/runtime-config";
 
 export function NetworkSwitcher() {
   const { isConnected, chainId } = useAccount();
   const { switchChain } = useSwitchChain();
+  const target = useChainInfo();
 
   useEffect(() => {
     if (!isConnected) return;
-    const targetChain = config.chains[0];
-    if (chainId && chainId !== targetChain.id) {
+    if (chainId && chainId !== target.chainId) {
       const timer = setTimeout(() => {
         switchChain(
-          { chainId: targetChain.id },
+          { chainId: target.chainId },
           {
             onError: async (error) => {
               const msg = error.message.toLowerCase();
@@ -24,7 +24,7 @@ export function NetworkSwitcher() {
                 msg.includes("network") ||
                 error.name === "ChainNotConfiguredError"
               ) {
-                await addNetwork(targetChain);
+                await addNetwork(target);
               }
             },
           },
@@ -32,23 +32,23 @@ export function NetworkSwitcher() {
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [isConnected, chainId, switchChain]);
+  }, [isConnected, chainId, target, switchChain]);
 
   return null;
 }
 
-async function addNetwork(chain: typeof config.chains[number]) {
+async function addNetwork(target: ReturnType<typeof useChainInfo>) {
   if (typeof window === "undefined") return;
   const eth = (window as { ethereum?: { request: (a: unknown) => Promise<unknown> } }).ethereum;
   if (!eth) return;
   const params: Record<string, unknown> = {
-    chainId: `0x${chain.id.toString(16)}`,
-    chainName: chain.name,
-    nativeCurrency: chain.nativeCurrency,
-    rpcUrls: [chain.rpcUrls.default.http[0]],
+    chainId: `0x${target.chainId.toString(16)}`,
+    chainName: target.chainName,
+    nativeCurrency: target.nativeCurrency,
+    rpcUrls: [target.rpcUrl],
   };
-  if (chain.blockExplorers?.default?.url) {
-    params.blockExplorerUrls = [chain.blockExplorers.default.url];
+  if (target.blockExplorerUrl) {
+    params.blockExplorerUrls = [target.blockExplorerUrl];
   }
   try {
     await eth.request({ method: "wallet_addEthereumChain", params: [params] });

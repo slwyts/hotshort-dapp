@@ -13,7 +13,7 @@ import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
-import { HOTSHORT_VAULT, HS_TOKEN } from "@/lib/contracts/addresses";
+import { useContracts } from "@/lib/runtime-config";
 import {
   BURN_ALLOCATION_BPS,
   BURN_AIRDROP_MIN_USDT,
@@ -49,6 +49,7 @@ export default function BurnPage() {
   const { jwt, signIn } = useSiweJwt();
   const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
+  const { vault, hsToken } = useContracts();
 
   const [me, setMe] = useState<BurnMe | null>(null);
   const [board, setBoard] = useState<Leaderboard | null>(null);
@@ -94,19 +95,19 @@ export default function BurnPage() {
       const amountWei = parseUnits(hsAmount, 18);
       Swal.fire({ title: t("burn.txApprove"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       await writeContractAsync({
-        address: HS_TOKEN as `0x${string}`,
+        address: hsToken,
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [HOTSHORT_VAULT as `0x${string}`, amountWei],
+        args: [vault, amountWei],
       });
 
       Swal.fire({ title: t("burn.txBurn"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const referrer = (getStoredReferrer() ?? "0x0000000000000000000000000000000000000000") as `0x${string}`;
       const txHash = await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "burnHS",
-        args: [HS_TOKEN as `0x${string}`, amountWei, referrer],
+        args: [hsToken, amountWei, referrer],
       });
 
       await api.post(
@@ -159,7 +160,7 @@ export default function BurnPage() {
       }
       Swal.fire({ title: t("burn.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const txHash = await writeContractAsync({
-        address: HOTSHORT_VAULT as `0x${string}`,
+        address: vault,
         abi: VAULT_ABI,
         functionName: "claim",
         args: [

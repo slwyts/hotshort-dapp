@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "./env";
 import { health } from "./routes/health";
+import { config } from "./routes/config";
 import { oracle } from "./routes/oracle";
 import { auth } from "./routes/auth";
 import { stake } from "./routes/stake";
@@ -18,6 +19,7 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.use("*", cors({ origin: "*", maxAge: 600 }));
 app.route("/health", health);
+app.route("/config", config);
 app.route("/oracle", oracle);
 app.route("/auth", auth);
 app.route("/stake", stake);
