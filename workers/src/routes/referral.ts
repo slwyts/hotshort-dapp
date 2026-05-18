@@ -97,6 +97,8 @@ referral.get("/me", async (c) => {
  *   - 不允许形成环（referrer 的祖先链中不能出现自己）
  *   - referrer 自己必须已绑定上级（保证链条连通到根）；
  *     例外：平台 Vault owner 作为根节点，无需绑定上级也可被引用
+ *   - 调用方 = 平台 Vault owner 时绕开链条连通性 / 环检测，
+ *     只校验地址合法 + 非自身 + 未绑定（owner 是孤立根，没有上级链可校验）
  */
 referral.post("/bind", async (c) => {
   const user = await requireUser(c);
@@ -110,6 +112,12 @@ referral.post("/bind", async (c) => {
     .bind(user)
     .first<{ referrer: string | null }>();
   if (existing?.referrer) return c.json({ error: "already bound", referrer: existing.referrer }, 409);
+
+  const platformRoot = (await readVaultOwner(c.env)).toLowerCase();
+  if (user === platformRoot) {
+    await upsertUser(c.env, user, ref);
+    return c.json({ ok: true, referrer: ref });
+  }
 
   // 链条连通性：referrer 必须自己已有上级，平台 owner 例外
   const resolved = await resolveReferrer(c.env, user, ref);
