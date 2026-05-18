@@ -12,8 +12,9 @@ import { PageShell } from "@/components/page-shell";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { useReferralGate } from "@/lib/hooks/use-referral-gate";
+import { useEnsureAllowance } from "@/lib/hooks/use-ensure-allowance";
 import { api, endpoints } from "@/lib/api";
-import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
+import { VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
 import { useContracts } from "@/lib/runtime-config";
 import { LOTTERY_PRIZE_BPS, bpsToPercent } from "@/lib/constants/business-rules";
@@ -53,6 +54,7 @@ export default function LotteryPage() {
   const { t } = useLocale();
   const { vault, hsToken } = useContracts();
   const { ensureBound } = useReferralGate();
+  const ensureAllowance = useEnsureAllowance();
   const [data, setData] = useState<Round | null>(null);
   const [loading, setLoading] = useState(false);
   const [numbers, setNumbers] = useState(randomNumbers());
@@ -99,12 +101,7 @@ export default function LotteryPage() {
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading(),
       });
-      await writeContractAsync({
-        address: hsToken,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [vault, totalHsWei],
-      });
+      await ensureAllowance({ token: hsToken, spender: vault, amount: totalHsWei });
 
       Swal.fire({
         title: t("lot.txBuy"),

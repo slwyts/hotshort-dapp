@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useLocale } from "@/components/locale-provider";
 import { useReferralGate } from "@/lib/hooks/use-referral-gate";
-import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
+import { useEnsureAllowance } from "@/lib/hooks/use-ensure-allowance";
+import { VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
 import { useContracts } from "@/lib/runtime-config";
 import {
@@ -39,6 +40,7 @@ export function StakeForm({ onDeposited }: StakeFormProps) {
   const { writeContractAsync } = useWriteContract();
   const { vault, hsToken, usdtToken, pancakePair } = useContracts();
   const { ensureBound } = useReferralGate();
+  const ensureAllowance = useEnsureAllowance();
 
   const ASSET_TOKEN: Record<StakeAsset, `0x${string}`> = {
     USDT: usdtToken,
@@ -74,7 +76,7 @@ export function StakeForm({ onDeposited }: StakeFormProps) {
       const token = ASSET_TOKEN[asset];
       const amountWei = parseUnits(amount, 18);
 
-      // 1) approve
+      // 1) approve（已足额会直接跳过；不足额则等待 receipt 上链，避免 TP/Bitget 串行 nonce 冲突）
       Swal.fire({
         title: t("stake.txCommon"),
         text: t("stake.claim.confirm"),
@@ -83,12 +85,7 @@ export function StakeForm({ onDeposited }: StakeFormProps) {
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading(),
       });
-      await writeContractAsync({
-        address: token,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [vault, amountWei],
-      });
+      await ensureAllowance({ token, spender: vault, amount: amountWei });
 
       // 2) deposit
       Swal.fire({

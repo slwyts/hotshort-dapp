@@ -13,6 +13,7 @@ import { AiSubnav } from "@/components/ai-subnav";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { useReferralGate } from "@/lib/hooks/use-referral-gate";
+import { useEnsureAllowance } from "@/lib/hooks/use-ensure-allowance";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
@@ -35,6 +36,7 @@ export default function AiPage() {
   const { t } = useLocale();
   const { vault, usdtToken } = useContracts();
   const { ensureBound } = useReferralGate();
+  const ensureAllowance = useEnsureAllowance();
   const [pending, setPending] = useState<AiTierKey | null>(null);
 
   const { data: usdtBal } = useReadContract({
@@ -86,12 +88,7 @@ export default function AiPage() {
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading(),
       });
-      await writeContractAsync({
-        address: usdtToken,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [vault, amountWei],
-      });
+      await ensureAllowance({ token: usdtToken, spender: vault, amount: amountWei });
 
       Swal.fire({
         title: t("ai.txBuy"),

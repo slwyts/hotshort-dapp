@@ -13,6 +13,7 @@ import { AiSubnav } from "@/components/ai-subnav";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { useReferralGate } from "@/lib/hooks/use-referral-gate";
+import { useEnsureAllowance } from "@/lib/hooks/use-ensure-allowance";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
@@ -27,6 +28,7 @@ export default function SwapPage() {
   const { t } = useLocale();
   const { vault, hsToken } = useContracts();
   const { ensureBound } = useReferralGate();
+  const ensureAllowance = useEnsureAllowance();
   const [hs, setHs] = useState("100");
   const [submitting, setSubmitting] = useState(false);
   const [hsPrice, setHsPrice] = useState<number | null>(null);
@@ -78,12 +80,7 @@ export default function SwapPage() {
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading(),
       });
-      await writeContractAsync({
-        address: hsToken,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [vault, amountWei],
-      });
+      await ensureAllowance({ token: hsToken, spender: vault, amount: amountWei });
 
       Swal.fire({
         title: t("ai.swap.txSwap"),

@@ -12,8 +12,9 @@ import { PageShell } from "@/components/page-shell";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { useReferralGate } from "@/lib/hooks/use-referral-gate";
+import { useEnsureAllowance } from "@/lib/hooks/use-ensure-allowance";
 import { api, endpoints } from "@/lib/api";
-import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
+import { VAULT_ABI } from "@/lib/contracts/abis";
 import { useContracts } from "@/lib/runtime-config";
 import {
   BURN_ALLOCATION_BPS,
@@ -51,6 +52,7 @@ export default function BurnPage() {
   const { t } = useLocale();
   const { vault, hsToken } = useContracts();
   const { ensureBound } = useReferralGate();
+  const ensureAllowance = useEnsureAllowance();
 
   const [me, setMe] = useState<BurnMe | null>(null);
   const [board, setBoard] = useState<Leaderboard | null>(null);
@@ -96,12 +98,7 @@ export default function BurnPage() {
     try {
       const amountWei = parseUnits(hsAmount, 18);
       Swal.fire({ title: t("burn.txApprove"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
-      await writeContractAsync({
-        address: hsToken,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [vault, amountWei],
-      });
+      await ensureAllowance({ token: hsToken, spender: vault, amount: amountWei });
 
       Swal.fire({ title: t("burn.txBurn"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const txHash = await writeContractAsync({
