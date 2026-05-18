@@ -57,7 +57,7 @@ export async function settleAiDividend(env: Env): Promise<{ date: string; totalS
   const totalPoolStockWei = BigInt(Math.floor(totalPoolStockNum * 1e18));
 
   await env.DB.prepare(
-    `INSERT OR REPLACE INTO ai_dividend_pool_daily (date, target_volume, ratio_bps, total_pool_stock, hs_price_snapshot, settled)
+    `INSERT OR REPLACE INTO ai_dividend_pool_daily (date, target_volume, ratio_bps, total_pool_stock, stock_price_snapshot, settled)
      VALUES (?, ?, ?, ?, ?, 0)`,
   )
     .bind(

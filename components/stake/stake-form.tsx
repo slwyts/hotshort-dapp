@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useLocale } from "@/components/locale-provider";
+import { useReferralGate } from "@/lib/hooks/use-referral-gate";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
 import { useContracts } from "@/lib/runtime-config";
@@ -37,6 +38,7 @@ export function StakeForm({ onDeposited }: StakeFormProps) {
   const { t } = useLocale();
   const { writeContractAsync } = useWriteContract();
   const { vault, hsToken, usdtToken, pancakePair } = useContracts();
+  const { ensureBound } = useReferralGate();
 
   const ASSET_TOKEN: Record<StakeAsset, `0x${string}`> = {
     USDT: usdtToken,
@@ -61,6 +63,7 @@ export function StakeForm({ onDeposited }: StakeFormProps) {
       await swalError(t("common.coming"));
       return;
     }
+    if (!(await ensureBound())) return;
     const amountNum = Number(amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       await swalError(t("stake.invalid"));

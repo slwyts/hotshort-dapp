@@ -2,11 +2,12 @@ import { Hono } from "hono";
 import { type Address, type Hex } from "viem";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
-import { upsertUser, createStakeOrder } from "../lib/users";
+import { upsertUser, createStakeOrder, requireBoundUser } from "../lib/users";
 import { getCurrentRateBps } from "../lib/rates";
 import { nowSeconds } from "../lib/time";
 import { createClaimSignature } from "../lib/claims";
 import { stakeAssetWeiToUsdtWei, tokenForStakeAsset } from "../lib/pricing";
+import { readHsPriceUsdt } from "../lib/hs-price";
 import { verifyVaultDeposit } from "../lib/vault-events";
 import {
   STAKE_ASSETS,
@@ -54,12 +55,13 @@ stake.get("/orders", async (c) => {
 stake.post("/orders", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
+  const bound = await requireBoundUser(c.env, user);
+  if (!bound) return c.json({ error: "no upline" }, 403);
   const body = (await c.req.json().catch(() => ({}))) as {
     sourceTxHash?: string;
     asset?: string;
     amountWei?: string;
     lockMonths?: number;
-    referrer?: string;
   };
   const asset = body.asset as StakeAsset;
   const months = body.lockMonths as StakeLockMonths;
@@ -85,7 +87,7 @@ stake.post("/orders", async (c) => {
     purpose: 1,
   });
 
-  await upsertUser(c.env, user, body.referrer ?? null);
+  await upsertUser(c.env, user);
   const monthlyRateBps = await getCurrentRateBps(c.env, asset, months);
 
   const id = await createStakeOrder(c.env, {
@@ -145,11 +147,8 @@ stake.post("/claim", async (c) => {
     (principalUsdt * BigInt(order.monthly_rate_bps) * BigInt(order.lock_months)) /
     BigInt(BPS_DENOMINATOR);
 
-  // 取 HS 价格（USDT 计价）从 oracle 缓存读
-  const priceRow = await c.env.DB.prepare(
-    "SELECT value FROM admin_config WHERE key = 'hs_price_snapshot'",
-  ).first<{ value: string }>();
-  const hsPrice = priceRow ? Number(priceRow.value) : 0.001;
+  // HS 价格（USDT 计价）：实时读 PancakeSwap pair，30s 缓存
+  const hsPrice = await readHsPriceUsdt(c.env);
   if (hsPrice <= 0) return c.json({ error: "hs price unavailable" }, 503);
 
   // yieldHs = yieldUsdt / hsPrice

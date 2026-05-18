@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
 import { nowSeconds } from "../lib/time";
+import { readHsPriceUsdt } from "../lib/hs-price";
 
 export const portfolio = new Hono<{ Bindings: Env }>();
 
@@ -37,14 +38,12 @@ interface PortfolioResp {
 }
 
 async function readPrices(env: Env): Promise<{ hs: number; stock: number }> {
-  const rs = await env.DB.prepare(
-    "SELECT key, value FROM admin_config WHERE key IN ('stock_price_usdt', 'hs_price_snapshot')",
-  ).all<{ key: string; value: string }>();
-  const map = new Map<string, string>();
-  for (const r of rs.results ?? []) map.set(r.key, r.value);
+  const stockRow = await env.DB.prepare(
+    "SELECT value FROM admin_config WHERE key = 'stock_price_usdt'",
+  ).first<{ value: string }>();
   return {
-    hs: Number(map.get("hs_price_snapshot") ?? 0.001),
-    stock: Number(map.get("stock_price_usdt") ?? 1),
+    hs: await readHsPriceUsdt(env),
+    stock: Number(stockRow?.value ?? 1),
   };
 }
 

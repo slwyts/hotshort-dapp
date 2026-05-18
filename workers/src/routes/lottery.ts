@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { type Address, type Hex } from "viem";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
-import { upsertUser } from "../lib/users";
+import { upsertUser, requireBoundUser } from "../lib/users";
 import { ulid } from "../lib/ulid";
 import { computeHit } from "../lib/lottery";
 import { nowSeconds } from "../lib/time";
@@ -87,11 +87,12 @@ lottery.get("/round", async (c) => {
 lottery.post("/buy", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
+  const bound = await requireBoundUser(c.env, user);
+  if (!bound) return c.json({ error: "no upline" }, 403);
   const body = (await c.req.json().catch(() => ({}))) as {
     sourceTxHash?: string;
     numbers?: string;
     count?: number;
-    referrer?: string;
   };
   if (!/^\d{6}$/.test(body.numbers ?? "")) return c.json({ error: "bad numbers (6 digits)" }, 400);
   if (!body.sourceTxHash || !/^0x[a-fA-F0-9]{64}$/.test(body.sourceTxHash)) {
@@ -100,7 +101,7 @@ lottery.post("/buy", async (c) => {
   const count = Math.max(1, Math.floor(body.count ?? 1));
   if (count > 100) return c.json({ error: "count too large" }, 400);
 
-  await upsertUser(c.env, user, body.referrer ?? null);
+  await upsertUser(c.env, user);
   const round = await getOrCreateRound(c.env);
   const now = await nowSeconds(c.env);
 

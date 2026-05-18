@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { nowSeconds } from "./time";
+import { readHsPriceUsdt } from "./hs-price";
 
 const SCALE = 10n ** 18n;
 
@@ -58,11 +59,7 @@ export async function getStockPriceUsdt(env: Env): Promise<number> {
 }
 
 export async function getHsPriceUsdt(env: Env): Promise<number> {
-  const row = await env.DB.prepare(
-    "SELECT value FROM admin_config WHERE key = 'hs_price_snapshot'",
-  ).first<{ value: string }>();
-  const v = Number(row?.value ?? 0.001);
-  return v > 0 ? v : 0.001;
+  return readHsPriceUsdt(env);
 }
 
 /** 把 USDT (number) 折算成 18-decimal stock 单位（1 stock = stockPriceUsdt） */

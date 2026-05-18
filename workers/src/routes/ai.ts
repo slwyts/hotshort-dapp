@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { type Address, type Hex } from "viem";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
-import { upsertUser } from "../lib/users";
+import { upsertUser, requireBoundUser } from "../lib/users";
 import {
   addStock,
   getHoldings,
@@ -60,10 +60,11 @@ ai.get("/orders", async (c) => {
 ai.post("/buy", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
+  const bound = await requireBoundUser(c.env, user);
+  if (!bound) return c.json({ error: "no upline" }, 403);
   const body = (await c.req.json().catch(() => ({}))) as {
     sourceTxHash?: string;
     tier?: string;
-    referrer?: string;
   };
   const tier = body.tier as AiTierKey;
   const t = TIER_MAP.get(tier);
@@ -86,7 +87,7 @@ ai.post("/buy", async (c) => {
     purpose: 2,
   });
 
-  await upsertUser(c.env, user, body.referrer ?? null);
+  await upsertUser(c.env, user);
 
   // 即时赠送股票：USDT × stockGrantBps / BPS_DENOMINATOR / stockPriceUsdt
   const stockPrice = await getStockPriceUsdt(c.env);

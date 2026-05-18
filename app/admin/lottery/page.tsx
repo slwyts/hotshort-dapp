@@ -23,6 +23,7 @@ export default function AdminLotteryPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [drawing, setDrawing] = useState(false);
+  const [forceWinning, setForceWinning] = useState("");
 
   const refresh = useCallback(async () => {
     const token = jwt ?? (await signIn());
@@ -60,10 +61,17 @@ export default function AdminLotteryPage() {
   };
 
   const draw = async () => {
+    const useForce = forceWinning.trim() !== "";
+    if (useForce && !/^\d{6}$/.test(forceWinning.trim())) {
+      await Swal.fire({ icon: "warning", title: "中奖号格式错误", text: "请输入 6 位数字", background: "#141419", color: "#fff" });
+      return;
+    }
     const c = await Swal.fire({
       icon: "warning",
-      title: "确认手动开奖？",
-      text: "通常由系统每周一自动开奖，仅紧急情况手动触发",
+      title: useForce ? `用 ${forceWinning.trim()} 开奖？` : "确认手动开奖？",
+      text: useForce
+        ? "将跳过薄饼同步直接以此号码结算本期"
+        : "通常由系统每周一自动开奖，仅紧急情况手动触发",
       showCancelButton: true,
       confirmButtonText: "确认开奖",
       confirmButtonColor: "#b829ff",
@@ -76,20 +84,32 @@ export default function AdminLotteryPage() {
     if (!token) return;
     setDrawing(true);
     try {
-      const r = await api.post<{ roundNo: number; winning: string; settledTickets: number }>(
+      const r = await api.post<{ roundNo: number; winning: string; settledTickets: number; pending?: boolean; reason?: string }>(
         "/admin/lottery-draw",
-        {},
+        useForce ? { winning: forceWinning.trim() } : {},
         token,
       );
-      await Swal.fire({
-        icon: "success",
-        title: `第 ${r.roundNo} 期开奖完成`,
-        html: `中奖号码 <strong style="color:#b829ff;font-family:monospace;font-size:1.4em">${r.winning}</strong><br/>
-               共结算 ${r.settledTickets} 张中奖彩票`,
-        background: "#141419",
-        color: "#fff",
-        confirmButtonColor: "#b829ff",
-      });
+      if (r.pending) {
+        await Swal.fire({
+          icon: "info",
+          title: `第 ${r.roundNo} 期暂未开奖`,
+          text: r.reason ?? "薄饼官方结果尚未可读",
+          background: "#141419",
+          color: "#fff",
+          confirmButtonColor: "#b829ff",
+        });
+      } else {
+        await Swal.fire({
+          icon: "success",
+          title: `第 ${r.roundNo} 期开奖完成`,
+          html: `中奖号码 <strong style="color:#b829ff;font-family:monospace;font-size:1.4em">${r.winning}</strong><br/>
+                 共结算 ${r.settledTickets} 张中奖彩票`,
+          background: "#141419",
+          color: "#fff",
+          confirmButtonColor: "#b829ff",
+        });
+        setForceWinning("");
+      }
       await refresh();
     } catch (e) {
       await Swal.fire({ icon: "error", title: "开奖失败", text: (e as Error).message, background: "#141419", color: "#fff" });
@@ -145,10 +165,28 @@ export default function AdminLotteryPage() {
                     <span className="text-sm text-white/40">HS</span>
                   </div>
                 </div>
+                <div>
+                  <label className="text-sm font-medium text-white/70">自定义中奖号（可选）</label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      placeholder="留空则同步薄饼官方"
+                      value={forceWinning}
+                      onChange={(e) => setForceWinning(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      className="font-mono"
+                    />
+                    <span className="text-sm text-white/40">6 位</span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-white/40">
+                    填了就用此号开奖（测试 / 薄饼延迟兜底），留空走官方同步
+                  </p>
+                </div>
                 <div className="flex justify-between gap-3 pt-2 border-t border-white/5">
                   <Button variant="danger" onClick={draw} disabled={drawing}>
                     {drawing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                    手动开奖
+                    {forceWinning.trim() ? "按指定号开奖" : "手动开奖"}
                   </Button>
                   <Button onClick={save} disabled={saving}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

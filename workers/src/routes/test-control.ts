@@ -48,7 +48,6 @@ testControl.use("*", async (c, next) => {
 async function seedDefaults(env: Env, at: number): Promise<void> {
   const rows: [string, string][] = [
     ["owner_addresses", OWNER],
-    ["hs_price_snapshot", "0.001"],
     ["stock_price_usdt", "1"],
     ["stock_volume_min_usdt", "100000"],
     ["stock_volume_max_usdt", "100000"],

@@ -7,8 +7,14 @@ import { nowSeconds } from "./time";
 /**
  * 每周同步薄饼官方彩票开奖结果。
  * 若薄饼当期结果暂未可读，返回 pending，不结算本期，也不推进下一轮。
+ *
+ * 可选 forceWinning：管理员手动指定 6 位中奖号，跳过薄饼同步直接开奖。
+ *   适用：测试 / 薄饼当周开奖延迟兜底。
  */
-export async function drawLottery(env: Env): Promise<{ roundNo: number; winning: string; settledTickets: number; pending?: boolean; reason?: string }> {
+export async function drawLottery(
+  env: Env,
+  forceWinning?: string,
+): Promise<{ roundNo: number; winning: string; settledTickets: number; pending?: boolean; reason?: string }> {
   const now = await nowSeconds(env);
   const cur = await env.DB.prepare("SELECT value FROM admin_config WHERE key = 'lottery_current_round'").first<{ value: string }>();
   const roundNo = Number(cur?.value ?? 1);
@@ -17,13 +23,26 @@ export async function drawLottery(env: Env): Promise<{ roundNo: number; winning:
   const r = await env.DB.prepare("SELECT drawn_at FROM lottery_rounds WHERE round_no = ?").bind(roundNo).first<{ drawn_at: number | null }>();
   if (r?.drawn_at) return { roundNo, winning: "", settledTickets: 0 };
 
-  const synced = await syncPancakeWinning(env, roundNo);
-  if (!synced) return { roundNo, winning: "", settledTickets: 0, pending: true, reason: "pancake result unavailable" };
+  let winning: string;
+  let pancakeLotteryId: string;
+  let source: string;
+
+  if (forceWinning && /^\d{6}$/.test(forceWinning)) {
+    winning = forceWinning;
+    pancakeLotteryId = "manual";
+    source = "manual";
+  } else {
+    const synced = await syncPancakeWinning(env, roundNo);
+    if (!synced) return { roundNo, winning: "", settledTickets: 0, pending: true, reason: "pancake result unavailable" };
+    winning = synced.winning;
+    pancakeLotteryId = synced.pancakeLotteryId;
+    source = synced.source;
+  }
 
   await env.DB.prepare(
     "UPDATE lottery_rounds SET drawn_at = ?, winning_number = ?, pancake_lottery_id = ?, draw_source = ?, block_hash = ? WHERE round_no = ?",
   )
-    .bind(now, synced.winning, synced.pancakeLotteryId, synced.source, synced.source, roundNo)
+    .bind(now, winning, pancakeLotteryId, source, source, roundNo)
     .run();
 
   // 结算所有票
@@ -33,7 +52,7 @@ export async function drawLottery(env: Env): Promise<{ roundNo: number; winning:
 
   let settled = 0;
   for (const t of tickets.results ?? []) {
-    const r = computeHit(t.numbers, synced.winning);
+    const r = computeHit(t.numbers, winning);
     if (!r.kind) continue;
     const prize = prizeFromPool(poolWei, r.bps);
     if (prize <= 0n) continue;
@@ -58,5 +77,5 @@ export async function drawLottery(env: Env): Promise<{ roundNo: number; winning:
     .bind(nextRound, ticketHsWei.toString(), refillHsWei.toString(), now)
     .run();
 
-  return { roundNo, winning: synced.winning, settledTickets: settled };
+  return { roundNo, winning, settledTickets: settled };
 }

@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { PageShell } from "@/components/page-shell";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
+import { useReferralGate } from "@/lib/hooks/use-referral-gate";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
 import { useContracts } from "@/lib/runtime-config";
@@ -20,7 +21,6 @@ import {
   bpsToPercent,
 } from "@/lib/constants/business-rules";
 import { formatNumber, shortenAddress, cn } from "@/lib/utils";
-import { getStoredReferrer } from "@/components/referral-handler";
 
 interface BurnMe {
   totalBurnedHs: string;
@@ -50,6 +50,7 @@ export default function BurnPage() {
   const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
   const { vault, hsToken } = useContracts();
+  const { ensureBound } = useReferralGate();
 
   const [me, setMe] = useState<BurnMe | null>(null);
   const [board, setBoard] = useState<Leaderboard | null>(null);
@@ -88,6 +89,7 @@ export default function BurnPage() {
     }
     const num = Number(hsAmount);
     if (!Number.isFinite(num) || num <= 0) return;
+    if (!(await ensureBound())) return;
     const token = jwt ?? (await signIn());
     if (!token) return;
     setSubmitting(true);
@@ -102,12 +104,11 @@ export default function BurnPage() {
       });
 
       Swal.fire({ title: t("burn.txBurn"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
-      const referrer = (getStoredReferrer() ?? "0x0000000000000000000000000000000000000000") as `0x${string}`;
       const txHash = await writeContractAsync({
         address: vault,
         abi: VAULT_ABI,
         functionName: "burnHS",
-        args: [hsToken, amountWei, referrer],
+        args: [hsToken, amountWei, "0x0000000000000000000000000000000000000000"],
       });
 
       await api.post(
@@ -115,7 +116,6 @@ export default function BurnPage() {
         {
           sourceTxHash: txHash,
           hsAmountWei: amountWei.toString(),
-          referrer: referrer === "0x0000000000000000000000000000000000000000" ? undefined : referrer,
         },
         token,
       );

@@ -12,6 +12,7 @@ import { PageShell } from "@/components/page-shell";
 import { AiSubnav } from "@/components/ai-subnav";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
+import { useReferralGate } from "@/lib/hooks/use-referral-gate";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
@@ -25,6 +26,7 @@ export default function SwapPage() {
   const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
   const { vault, hsToken } = useContracts();
+  const { ensureBound } = useReferralGate();
   const [hs, setHs] = useState("100");
   const [submitting, setSubmitting] = useState(false);
   const [hsPrice, setHsPrice] = useState<number | null>(null);
@@ -63,6 +65,7 @@ export default function SwapPage() {
       await Swal.fire({ icon: "warning", title: t("ai.swap.notEnough"), background: "#141419", color: "#fff" });
       return;
     }
+    if (!(await ensureBound())) return;
     const token = jwt ?? (await signIn());
     if (!token) return;
     setSubmitting(true);

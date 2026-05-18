@@ -1,31 +1,52 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 const REFERRAL_KEY = "hotshort_referrer";
 
 /**
  * 处理 ?ref=0x... 邀请链接：
- *   - URL 带 ref 参数 → 写入 localStorage 持久化
- *   - 后续连接钱包 / 下单时由各模块读取并传给 Worker /referral/bind
+ *   - URL 带 ref → 存 localStorage
+ *   - 不在 /me 时自动跳 /me?tab=invite，绑定卡会读 storage 预填
+ *   - 跳转后清掉 URL 上的 ?ref，避免分享 / 收藏夹重复触发
+ *   - 已绑定 / 自己 = ref 等情况由 /referral/bind 接口最终把关
  */
 export function ReferralHandler() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const ref = params.get("ref");
-    if (!ref) return;
-    if (!/^0x[a-fA-F0-9]{40}$/.test(ref)) return;
-    const existing = localStorage.getItem(REFERRAL_KEY);
-    if (existing && existing.toLowerCase() === ref.toLowerCase()) return;
-    if (!existing) {
-      localStorage.setItem(REFERRAL_KEY, ref.toLowerCase());
+    const ref = searchParams.get("ref");
+    if (!ref || !/^0x[a-fA-F0-9]{40}$/.test(ref)) return;
+
+    const lower = ref.toLowerCase();
+    localStorage.setItem(REFERRAL_KEY, lower);
+
+    // 清掉 URL 的 ?ref，保留其它 query
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("ref");
+    const queryStr = params.toString();
+    const cleanUrl = queryStr ? `${pathname}?${queryStr}` : pathname;
+
+    if (pathname === "/me") {
+      router.replace(cleanUrl);
+    } else {
+      router.replace("/me?tab=invite");
     }
-  }, []);
+  }, [pathname, router, searchParams]);
+
   return null;
 }
 
 export function getStoredReferrer(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(REFERRAL_KEY);
+}
+
+export function clearStoredReferrer(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(REFERRAL_KEY);
 }

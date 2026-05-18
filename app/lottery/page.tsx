@@ -11,13 +11,13 @@ import { Input } from "@/components/ui/input";
 import { PageShell } from "@/components/page-shell";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
+import { useReferralGate } from "@/lib/hooks/use-referral-gate";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
 import { useContracts } from "@/lib/runtime-config";
 import { LOTTERY_PRIZE_BPS, bpsToPercent } from "@/lib/constants/business-rules";
 import { formatNumber, shortenAddress, cn } from "@/lib/utils";
-import { getStoredReferrer } from "@/components/referral-handler";
 
 interface Round {
   current: { roundNo: number; poolHs: string; ticketPriceHs: string };
@@ -52,6 +52,7 @@ export default function LotteryPage() {
   const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
   const { vault, hsToken } = useContracts();
+  const { ensureBound } = useReferralGate();
   const [data, setData] = useState<Round | null>(null);
   const [loading, setLoading] = useState(false);
   const [numbers, setNumbers] = useState(randomNumbers());
@@ -84,6 +85,7 @@ export default function LotteryPage() {
       return;
     }
     if (!data) return;
+    if (!(await ensureBound())) return;
     const token = jwt ?? (await signIn());
     if (!token) return;
 
@@ -125,7 +127,6 @@ export default function LotteryPage() {
           sourceTxHash: txHash,
           numbers,
           count,
-          referrer: getStoredReferrer() ?? undefined,
         },
         token,
       );
@@ -228,7 +229,7 @@ export default function LotteryPage() {
           <CardTitle className="flex items-center gap-2">
             <TicketIcon className="h-5 w-5 text-[#b829ff]" /> {t("lot.buyTitle")}
           </CardTitle>
-          <CardDescription>{t("lot.buyDesc", { price: formatNumber(ticketHs, 4) })}</CardDescription>
+          <CardDescription>{t("lot.buyDesc", { price: formatNumber(ticketHs, 0) })}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
@@ -285,7 +286,7 @@ export default function LotteryPage() {
                 +
               </Button>
             </div>
-            <p className="mt-1 text-[11px] text-white/40">{t("lot.totalCost", { amount: formatNumber(ticketHs * count, 2) })}</p>
+            <p className="mt-1 text-[11px] text-white/40">{t("lot.totalCost", { usdt: count, hs: formatNumber(ticketHs * count, 0) })}</p>
           </div>
 
           <Button onClick={buy} disabled={submitting} size="lg" className="w-full">

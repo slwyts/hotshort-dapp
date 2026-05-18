@@ -1,6 +1,48 @@
 import type { Env } from "../env";
 import { ulid } from "./ulid";
 import { nowSeconds } from "./time";
+import { readVaultOwner } from "./vault-owner";
+
+/**
+ * 检查 referrer 是否可被引用：
+ *   - 必须为合法地址且不等于自己
+ *   - referrer 自己必须已绑定上级（链条连通）
+ *   - 例外：平台 Vault owner 是根，无需有上级
+ * 不合法返回 null（调用方按"无 referrer"处理）。
+ */
+export async function resolveReferrer(
+  env: Env,
+  user: string,
+  candidate: string | null | undefined,
+): Promise<string | null> {
+  if (!candidate) return null;
+  const ref = candidate.toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(ref)) return null;
+  if (ref === user.toLowerCase()) return null;
+
+  const platformRoot = (await readVaultOwner(env)).toLowerCase();
+  if (ref === platformRoot) return ref;
+
+  const row = await env.DB.prepare("SELECT referrer FROM users WHERE address = ?")
+    .bind(ref)
+    .first<{ referrer: string | null }>();
+  return row?.referrer ? ref : null;
+}
+
+/**
+ * 用户必须已绑定上级才能下单 / 燃烧 / 抽奖。
+ *   - 平台 owner 自己作为根，免疫此规则
+ * 已绑定 / 是 owner 返回 true，否则 false。
+ */
+export async function requireBoundUser(env: Env, user: string): Promise<boolean> {
+  const addr = user.toLowerCase();
+  const platformRoot = (await readVaultOwner(env)).toLowerCase();
+  if (addr === platformRoot) return true;
+  const row = await env.DB.prepare("SELECT referrer FROM users WHERE address = ?")
+    .bind(addr)
+    .first<{ referrer: string | null }>();
+  return !!row?.referrer;
+}
 
 /**
  * 用户首次连接钱包/下单时 upsert，确保 referral_paths 三代回填。

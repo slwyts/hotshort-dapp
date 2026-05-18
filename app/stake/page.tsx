@@ -8,7 +8,6 @@ import { PageShell } from "@/components/page-shell";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { useLocale } from "@/components/locale-provider";
 import { api, endpoints } from "@/lib/api";
-import { getStoredReferrer } from "@/components/referral-handler";
 import Swal from "sweetalert2";
 
 export default function StakePage() {
@@ -41,7 +40,6 @@ export default function StakePage() {
           asset: info.asset,
           amountWei: info.amountWei.toString(),
           lockMonths: info.lockMonths,
-          referrer: getStoredReferrer() ?? undefined,
         },
         token,
       );

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import { headers } from "next/headers";
 import { cookieToInitialState } from "wagmi";
 import { buildWagmiConfig } from "@/lib/web3";
@@ -44,7 +45,9 @@ export default async function RootLayout({
       <body className="min-h-screen antialiased">
         <LocaleProvider>
           <Web3Provider initialConfig={runtimeConfig} initialState={initialState}>
-            <ReferralHandler />
+            <Suspense fallback={null}>
+              <ReferralHandler />
+            </Suspense>
             <SiteHeader />
             <main className="min-h-[calc(100vh-3.5rem)]">{children}</main>
             <BottomNav />

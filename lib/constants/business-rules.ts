@@ -103,7 +103,7 @@ export const LOTTERY_DEFAULT_TICKET_USDT = 1;
 export const LOTTERY_TO_POOL_BPS = 7000;
 export const LOTTERY_TO_BURN_BPS = 3000;
 
-/** 命中位数 → 占当期奖池比例（bps）。命中前 4/5/6 位以"前 N 位顺序匹配"判定，1/2/3 位以"无序匹配 N 位"判定 */
+/** 命中前 N 位 → 占当期奖池比例（bps）。与 PancakeSwap LotteryV2 一致：左起连续前缀匹配，断点即止。 */
 export const LOTTERY_PRIZE_BPS = {
   hit1: 200,    // 2%
   hit2: 300,    // 3%

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { type Address, type Hex } from "viem";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
-import { upsertUser } from "../lib/users";
+import { upsertUser, requireBoundUser } from "../lib/users";
 import { ulid } from "../lib/ulid";
 import { nowSeconds } from "../lib/time";
 import { createClaimSignature } from "../lib/claims";
@@ -106,17 +106,18 @@ burn.get("/leaderboard", async (c) => {
 burn.post("/record", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
+  const bound = await requireBoundUser(c.env, user);
+  if (!bound) return c.json({ error: "no upline" }, 403);
   const body = (await c.req.json().catch(() => ({}))) as {
     sourceTxHash?: string;
     hsAmountWei?: string;
-    referrer?: string;
   };
   if (!body.hsAmountWei || !/^\d+$/.test(body.hsAmountWei)) return c.json({ error: "bad amount" }, 400);
   if (!body.sourceTxHash || !/^0x[a-fA-F0-9]{64}$/.test(body.sourceTxHash)) {
     return c.json({ error: "bad tx hash" }, 400);
   }
 
-  await upsertUser(c.env, user, body.referrer ?? null);
+  await upsertUser(c.env, user);
 
   const id = ulid();
   const amount = BigInt(body.hsAmountWei);
@@ -126,18 +127,23 @@ burn.post("/record", async (c) => {
   const exists = await c.env.DB.prepare("SELECT id FROM burn_records WHERE source_tx_hash = ?").bind(body.sourceTxHash).first();
   if (exists) return c.json({ id: exists.id as string, dedup: true });
 
+  // referrer 取 DB 中已绑定的上级（业务约束：用户必须先绑定才能 burn）
+  const me = await c.env.DB.prepare("SELECT referrer FROM users WHERE address = ?")
+    .bind(user)
+    .first<{ referrer: string | null }>();
+  const referrer = (me?.referrer ?? null) as Address | null;
+
   await verifyVaultBurn(c.env, {
     txHash: body.sourceTxHash as Hex,
     user: user as Address,
     amount,
-    referrer: body.referrer ? body.referrer.toLowerCase() as Address : undefined,
   });
 
   await c.env.DB.prepare(
     `INSERT INTO burn_records (id, user, hs_amount, referrer, burned_at, source_tx_hash)
      VALUES (?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, user, amount.toString(), body.referrer?.toLowerCase() ?? null, now, body.sourceTxHash)
+    .bind(id, user, amount.toString(), referrer, now, body.sourceTxHash)
     .run();
 
   // 累计 + 出局判断

@@ -8,8 +8,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
-import { api, endpoints } from "@/lib/api";
-import { getStoredReferrer } from "@/components/referral-handler";
+import { api, endpoints, ApiError } from "@/lib/api";
+import { getStoredReferrer, clearStoredReferrer } from "@/components/referral-handler";
 import { formatNumber, shortenAddress, cn } from "@/lib/utils";
 
 interface TreeResp {
@@ -23,6 +23,18 @@ interface MeResp {
   ancestors: { level1: string | null; level2: string | null; level3: string | null };
 }
 
+interface OwnerResp {
+  owner: string;
+}
+
+const BIND_ERROR_KEY: Record<string, string> = {
+  "referrer has no upline": "me.team.bindNoUpline",
+  "circular referral": "me.team.bindCircular",
+  "already bound": "me.team.bindAlreadyBound",
+  "cannot refer self": "me.team.bindSelf",
+  "invalid referrer": "me.team.bindInvalid",
+};
+
 export function TeamSection() {
   const { address, isConnected } = useAccount();
   const { jwt, signIn } = useSiweJwt();
@@ -32,6 +44,7 @@ export function TeamSection() {
   const [loading, setLoading] = useState(false);
   const [refInput, setRefInput] = useState("");
   const [binding, setBinding] = useState(false);
+  const [defaultReferrer, setDefaultReferrer] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!isConnected) return;
@@ -53,6 +66,13 @@ export function TeamSection() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    void api
+      .get<OwnerResp>(endpoints.referralOwner)
+      .then((r) => setDefaultReferrer(r.owner.toLowerCase()))
+      .catch(() => setDefaultReferrer(null));
+  }, []);
 
   // 未绑定上级时，自动预填 URL ?ref= 带过来的地址
   useEffect(() => {
@@ -86,12 +106,14 @@ export function TeamSection() {
         timer: 1500,
       });
       setRefInput("");
+      clearStoredReferrer();
       await refresh();
     } catch (e) {
+      const msg = e instanceof ApiError ? e.message : (e as Error).message;
+      const key = BIND_ERROR_KEY[msg] ?? "me.team.bindFailed";
       await Swal.fire({
         icon: "error",
-        title: t("me.team.bindFailed"),
-        text: (e as Error).message,
+        title: t(key),
         background: "#141419",
         color: "#fff",
       });
@@ -200,6 +222,15 @@ export function TeamSection() {
                 {binding ? <Loader2 className="h-4 w-4 animate-spin" /> : t("me.team.bindAction")}
               </Button>
             </div>
+            {defaultReferrer && (
+              <button
+                type="button"
+                onClick={() => setRefInput(defaultReferrer)}
+                className="mt-2 text-[11px] text-[#00c6ff] underline-offset-2 hover:underline"
+              >
+                {t("me.team.bindUseDefault")}
+              </button>
+            )}
           </CardContent>
         </Card>
       )}

@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
-import { upsertUser } from "../lib/users";
+import { upsertUser, resolveReferrer } from "../lib/users";
+import { readVaultOwner } from "../lib/vault-owner";
 
 export const referral = new Hono<{ Bindings: Env }>();
 
@@ -66,6 +67,12 @@ referral.get("/tree", async (c) => {
   });
 });
 
+/** GET /referral/owner  平台默认邀请人（Vault owner，链上读，60s 缓存） */
+referral.get("/owner", async (c) => {
+  const owner = await readVaultOwner(c.env);
+  return c.json({ owner });
+});
+
 /** GET /referral/me  自己绑定的上级 */
 referral.get("/me", async (c) => {
   const user = await requireUser(c);
@@ -88,6 +95,8 @@ referral.get("/me", async (c) => {
  *   - referrer 必须是合法地址，且不能等于自己
  *   - 一旦绑定成功，不能再修改（防止洗榜）
  *   - 不允许形成环（referrer 的祖先链中不能出现自己）
+ *   - referrer 自己必须已绑定上级（保证链条连通到根）；
+ *     例外：平台 Vault owner 作为根节点，无需绑定上级也可被引用
  */
 referral.post("/bind", async (c) => {
   const user = await requireUser(c);
@@ -102,8 +111,12 @@ referral.post("/bind", async (c) => {
     .first<{ referrer: string | null }>();
   if (existing?.referrer) return c.json({ error: "already bound", referrer: existing.referrer }, 409);
 
+  // 链条连通性：referrer 必须自己已有上级，平台 owner 例外
+  const resolved = await resolveReferrer(c.env, user, ref);
+  if (!resolved) return c.json({ error: "referrer has no upline" }, 400);
+
   // 环检测：沿 ref 的上级链查 6 跳，遇到 self 拒绝
-  let cursor = ref;
+  let cursor = resolved;
   for (let i = 0; i < 6; i++) {
     const r = await c.env.DB.prepare("SELECT referrer FROM users WHERE address = ?")
       .bind(cursor)
@@ -113,6 +126,6 @@ referral.post("/bind", async (c) => {
     cursor = r.referrer;
   }
 
-  await upsertUser(c.env, user, ref);
-  return c.json({ ok: true, referrer: ref });
+  await upsertUser(c.env, user, resolved);
+  return c.json({ ok: true, referrer: resolved });
 });

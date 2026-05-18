@@ -207,12 +207,14 @@ admin.post("/lottery-config", async (c) => {
   return c.json({ saved: true });
 });
 
-/** POST /admin/lottery-draw  紧急/手动开奖 */
+/** POST /admin/lottery-draw  紧急/手动开奖。可选 body: { winning: '123456' } 跳过薄饼同步直接用指定号码 */
 admin.post("/lottery-draw", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
+  const body = (await c.req.json().catch(() => ({}))) as { winning?: string };
+  const force = typeof body.winning === "string" && /^\d{6}$/.test(body.winning) ? body.winning : undefined;
   const { drawLottery } = await import("../lib/lottery-draw");
-  const r = await drawLottery(c.env);
+  const r = await drawLottery(c.env, force);
   return c.json(r);
 });
 
@@ -282,8 +284,4 @@ admin.get("/agents", async (c) => {
   const like = `%${q}%`;
   const rs = await c.env.DB.prepare(sql).bind(q, like).all();
   return c.json({ agents: rs.results ?? [] });
-});
-admin.post("/owners", async (c) => {
-  // owner 现在直接从链上 Vault 合约读取，无需后台维护白名单
-  return c.json({ error: "deprecated: owner is read from Vault.owner() on-chain" }, 410);
 });

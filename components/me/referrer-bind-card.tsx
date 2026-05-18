@@ -8,18 +8,30 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
-import { api, endpoints } from "@/lib/api";
-import { getStoredReferrer } from "@/components/referral-handler";
+import { api, endpoints, ApiError } from "@/lib/api";
+import { getStoredReferrer, clearStoredReferrer } from "@/components/referral-handler";
 
 interface MeResp {
   referrer: string | null;
 }
+interface OwnerResp {
+  owner: string;
+}
+
+const BIND_ERROR_KEY: Record<string, string> = {
+  "referrer has no upline": "me.team.bindNoUpline",
+  "circular referral": "me.team.bindCircular",
+  "already bound": "me.team.bindAlreadyBound",
+  "cannot refer self": "me.team.bindSelf",
+  "invalid referrer": "me.team.bindInvalid",
+};
 
 export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
   const { address, isConnected } = useAccount();
   const { jwt, signIn } = useSiweJwt();
   const { t } = useLocale();
   const [referrer, setReferrer] = useState<string | null | undefined>(undefined);
+  const [defaultReferrer, setDefaultReferrer] = useState<string | null>(null);
   const [refInput, setRefInput] = useState("");
   const [binding, setBinding] = useState(false);
 
@@ -27,13 +39,20 @@ export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
     if (!isConnected) return;
     const token = jwt ?? (await signIn());
     if (!token) return;
-    const m = await api.get<MeResp>("/referral/me", token).catch(() => null);
+    const m = await api.get<MeResp>(endpoints.referralMe, token).catch(() => null);
     setReferrer(m?.referrer ?? null);
   }, [isConnected, jwt, signIn]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    void api
+      .get<OwnerResp>(endpoints.referralOwner)
+      .then((r) => setDefaultReferrer(r.owner.toLowerCase()))
+      .catch(() => setDefaultReferrer(null));
+  }, []);
 
   useEffect(() => {
     if (referrer === null && !refInput) {
@@ -45,6 +64,10 @@ export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
   if (!isConnected) return null;
   if (referrer === undefined) return null;
   if (referrer) return null;
+
+  const useDefault = () => {
+    if (defaultReferrer) setRefInput(defaultReferrer);
+  };
 
   const bind = async () => {
     const ref = refInput.trim().toLowerCase();
@@ -70,13 +93,15 @@ export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
         timer: 1500,
       });
       setRefInput("");
+      clearStoredReferrer();
       await refresh();
       onBound?.();
     } catch (e) {
+      const msg = e instanceof ApiError ? e.message : (e as Error).message;
+      const key = BIND_ERROR_KEY[msg] ?? "me.team.bindFailed";
       await Swal.fire({
         icon: "error",
-        title: t("me.team.bindFailed"),
-        text: (e as Error).message,
+        title: t(key),
         background: "#141419",
         color: "#fff",
       });
@@ -106,6 +131,15 @@ export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
             {binding ? <Loader2 className="h-4 w-4 animate-spin" /> : t("me.team.bindAction")}
           </Button>
         </div>
+        {defaultReferrer && (
+          <button
+            type="button"
+            onClick={useDefault}
+            className="mt-2 text-[11px] text-[#00c6ff] underline-offset-2 hover:underline"
+          >
+            {t("me.team.bindUseDefault")}
+          </button>
+        )}
       </CardContent>
     </Card>
   );

@@ -12,13 +12,13 @@ import { PageShell } from "@/components/page-shell";
 import { AiSubnav } from "@/components/ai-subnav";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
+import { useReferralGate } from "@/lib/hooks/use-referral-gate";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
 import { useContracts } from "@/lib/runtime-config";
 import { AI_TIERS, BPS_DENOMINATOR, type AiTierKey } from "@/lib/constants/business-rules";
 import { formatNumber } from "@/lib/utils";
-import { getStoredReferrer } from "@/components/referral-handler";
 
 const TIER_VISUAL: Record<AiTierKey, { mascot: string; theme: string; sub: string; dividend: string }> = {
   genesis: { mascot: "/mascots/overnight.png", theme: "#f59e0b", sub: "GENESIS", dividend: "56%" },
@@ -34,6 +34,7 @@ export default function AiPage() {
   const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
   const { vault, usdtToken } = useContracts();
+  const { ensureBound } = useReferralGate();
   const [pending, setPending] = useState<AiTierKey | null>(null);
 
   const { data: usdtBal } = useReadContract({
@@ -54,6 +55,7 @@ export default function AiPage() {
       await Swal.fire({ icon: "info", title: t("ai.notReady"), text: t("ai.notReady.text"), background: "#141419", color: "#fff" });
       return;
     }
+    if (!(await ensureBound())) return;
     if (usdtNum < usdt) {
       const tierMeta = AI_TIERS.find((x) => x.key === tier)!;
       await Swal.fire({
@@ -111,7 +113,6 @@ export default function AiPage() {
         {
           sourceTxHash: txHash,
           tier,
-          referrer: getStoredReferrer() ?? undefined,
         },
         token,
       );

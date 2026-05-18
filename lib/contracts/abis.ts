@@ -46,35 +46,6 @@ export const ERC20_ABI = [
   },
 ] as const;
 
-/** PancakeSwap V2 Pair 用于取 HS/USDT 实时价 */
-export const PAIR_ABI = [
-  {
-    name: "getReserves",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [
-      { name: "reserve0", type: "uint112" },
-      { name: "reserve1", type: "uint112" },
-      { name: "blockTimestampLast", type: "uint32" },
-    ],
-  },
-  {
-    name: "token0",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "address" }],
-  },
-  {
-    name: "token1",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "address" }],
-  },
-] as const;
-
 /** HotshortVault 主合约 ABI */
 export const VAULT_ABI = [
   {

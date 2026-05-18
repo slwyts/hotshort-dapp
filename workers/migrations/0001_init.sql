@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS ai_dividend_pool_daily (
   target_volume TEXT NOT NULL,
   ratio_bps INTEGER NOT NULL,
   total_pool_stock TEXT NOT NULL,
-  hs_price_snapshot TEXT NOT NULL,
+  stock_price_snapshot TEXT NOT NULL,
   settled INTEGER NOT NULL DEFAULT 0
 );
 
@@ -281,7 +281,6 @@ INSERT OR IGNORE INTO admin_config (key, value, updated_by, updated_at) VALUES
   ('stock_volume_min_usdt', '100000', 'init', strftime('%s','now')),
   ('stock_volume_max_usdt', '200000', 'init', strftime('%s','now')),
   ('stock_dividend_ratio_bps', '100', 'init', strftime('%s','now')),
-  ('hs_price_snapshot', '0.001', 'init', strftime('%s','now')),
   ('lottery_ticket_price_usdt', '1', 'init', strftime('%s','now')),
   ('lottery_weekly_refill_hs', '100000', 'init', strftime('%s','now')),
   ('lottery_current_round', '1', 'init', strftime('%s','now')),
