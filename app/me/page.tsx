@@ -15,9 +15,10 @@ const AssetsSection = dynamic(() => import("@/components/me/assets-section").the
 const OrdersSection = dynamic(() => import("@/components/me/orders-section").then((m) => m.OrdersSection), { ssr: false });
 const TeamSection = dynamic(() => import("@/components/me/team-section").then((m) => m.TeamSection), { ssr: false });
 const InviteSection = dynamic(() => import("@/components/me/invite-section").then((m) => m.InviteSection), { ssr: false });
+const DocsSection = dynamic(() => import("@/components/me/docs-section").then((m) => m.DocsSection), { ssr: false });
 const SettingsSection = dynamic(() => import("@/components/me/settings-section").then((m) => m.SettingsSection), { ssr: false });
 
-const TAB_KEYS = ["assets", "orders", "team", "invite", "settings"] as const;
+const TAB_KEYS = ["assets", "orders", "team", "invite", "docs", "settings"] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 
 function MeContent() {
@@ -109,6 +110,7 @@ function MeContent() {
         {tab === "orders" && <OrdersSection />}
         {tab === "team" && <TeamSection />}
         {tab === "invite" && <InviteSection />}
+        {tab === "docs" && <DocsSection />}
         {tab === "settings" && <SettingsSection />}
       </div>
     </PageShell>
