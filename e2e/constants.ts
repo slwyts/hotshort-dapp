@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 /**
  * 测试用常量：Hardhat 标准助记词派生的前 10 个账户。
  * 助记词：test test test test test test test test test test test junk
@@ -46,7 +49,20 @@ export const ANVIL_CHAIN_ID = 31337;
 
 export const BSC_FORK_URL = "https://bsc-dataseed.binance.org";
 
-// BSC 主网真实地址（anvil fork 后可用）
-export const HS_TOKEN = "0xcf4907621f0d9803c7288423b4303226b696b533";
-export const USDT_TOKEN = "0x55d398326f99059ff775485246999027b3197955";
-export const PANCAKE_PAIR = "0x2398e858ac6ad9dea4496bc6ecacea4ce77cc67e";
+function readDevVarAddress(key: string, fallback: `0x${string}`): `0x${string}` {
+  const envValue = process.env[key];
+  if (envValue?.match(/^0x[a-fA-F0-9]{40}$/)) return envValue as `0x${string}`;
+
+  const devVarsPath = join(process.cwd(), "workers/.dev.vars");
+  if (existsSync(devVarsPath)) {
+    const match = readFileSync(devVarsPath, "utf8").match(new RegExp(`^${key}=(0x[a-fA-F0-9]{40})$`, "m"));
+    if (match) return match[1] as `0x${string}`;
+  }
+
+  return fallback;
+}
+
+// 本地优先读取 scripts/dev-local.sh 写入的测试币地址；未启动本地环境时回退到旧 BSC fork 地址。
+export const HS_TOKEN = readDevVarAddress("HS_TOKEN", "0xcf4907621f0d9803c7288423b4303226b696b533");
+export const USDT_TOKEN = readDevVarAddress("USDT_TOKEN", "0x55d398326f99059ff775485246999027b3197955");
+export const PANCAKE_PAIR = readDevVarAddress("PANCAKE_PAIR", "0x2398e858ac6ad9dea4496bc6ecacea4ce77cc67e");

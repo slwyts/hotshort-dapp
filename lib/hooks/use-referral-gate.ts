@@ -41,7 +41,7 @@ export function useReferralGate() {
       toast: true,
       position: "top",
     });
-    setTimeout(() => router.push("/me?tab=invite"), 1000);
+    setTimeout(() => router.push("/me?tab=assets"), 1000);
     return false;
   }, [isConnected, jwt, signIn, t, router]);
 

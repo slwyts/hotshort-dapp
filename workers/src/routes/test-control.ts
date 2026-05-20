@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { syncVaultEvents } from "../lib/indexer";
 import { settleAiDividend } from "../lib/dividend";
+import { releaseDueAiStock } from "../lib/ai-releases";
+import { syncStockQuote } from "../lib/stocks";
 import { drawLottery } from "../lib/lottery-draw";
 import { settleBurnRound } from "../lib/burn-settle";
 import { advanceTestNowSeconds, isTestMode, nowSeconds, setTestNowSeconds } from "../lib/time";
@@ -19,8 +21,9 @@ const OWNER = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
 const RESET_TABLES = [
   "claim_signatures",
   "referral_rewards",
-  "stock_swap_locks",
+  "stock_swaps",
   "stock_holdings",
+  "ai_stock_releases",
   "ai_dividend_user_daily",
   "ai_dividend_pool_daily",
   "ai_orders",
@@ -36,6 +39,7 @@ const RESET_TABLES = [
   "airdrop_list",
   "genesis_nodes",
   "referral_paths",
+  "referral_codes",
   "users",
   "admin_config",
 ];
@@ -49,6 +53,9 @@ async function seedDefaults(env: Env, at: number): Promise<void> {
   const rows: [string, string][] = [
     ["owner_addresses", OWNER],
     ["stock_price_usdt", "1"],
+    ["stock_symbol", "WTO"],
+    ["stock_price_provider", "manual"],
+    ["stock_quote_mode", "manual"],
     ["stock_volume_min_usdt", "100000"],
     ["stock_volume_max_usdt", "100000"],
     ["stock_dividend_ratio_bps", "100"],
@@ -128,6 +135,10 @@ testControl.post("/cron", async (c) => {
       return c.json({ job: body.job, result: await syncVaultEvents(c.env) });
     case "ai-dividend":
       return c.json({ job: body.job, result: await settleAiDividend(c.env) });
+    case "ai-release":
+      return c.json({ job: body.job, result: await releaseDueAiStock(c.env) });
+    case "stock-price":
+      return c.json({ job: body.job, result: await syncStockQuote(c.env) });
     case "lottery":
       return c.json({ job: body.job, result: await drawLottery(c.env) });
     case "burn-weekly":

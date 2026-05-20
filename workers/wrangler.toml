@@ -22,6 +22,7 @@ HS_TOKEN = "0x0A6C48EE6f437348f80224AA3a55E05ab5542f5E"
 USDT_TOKEN = "0x551bA5e6e7a286661D9AcE8664b7B197a6d94807"
 PANCAKE_PAIR = "0xC337E491Db3e1701b12453dB5702cCe6585480D9"
 PANCAKE_LOTTERY_ADDRESS = "0x5aF6D33DE2ccEC94efb1bDF8f92Bd58085432d2c"
+STOCK_QUOTE_MODE = "auto"
 
 # 开发用本地变量见 .dev.vars（不入版本库）
 # Secrets 通过 `wrangler secret put SIGNER_PRIVATE_KEY / JWT_SECRET / BSCSCAN_API_KEY` 设置
@@ -29,6 +30,7 @@ PANCAKE_LOTTERY_ADDRESS = "0x5aF6D33DE2ccEC94efb1bDF8f92Bd58085432d2c"
 [triggers]
 crons = [
   "* * * * *",     # 每分钟：拉 Vault 事件 → D1
+  "*/15 * * * *",  # 每 15 分钟：自动同步 WTO 股价
   "0 0 * * *",     # 每日 UTC 00:00（北京时间 08:00）：股票分红结算
   "0 16 * * SUN",  # 每周日 UTC 16:00（北京时间周一 00:00）：彩票开奖 + 燃烧周榜结算
 ]

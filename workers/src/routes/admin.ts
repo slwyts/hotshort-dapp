@@ -4,6 +4,7 @@ import type { Env } from "../env";
 import { requireUser } from "./auth";
 import { invalidateRate } from "../lib/rates";
 import { scanGenesisTransfers } from "../lib/genesis-scan";
+import { getStockQuote, setManualStockPrice, setStockQuoteMode, syncStockQuote, type StockQuoteMode } from "../lib/stocks";
 import { readVaultOwner } from "../lib/vault-owner";
 import {
   STAKE_ASSETS,
@@ -145,7 +146,14 @@ admin.post("/ai-config", async (c) => {
   return c.json({ saved: true });
 });
 
-/** POST /admin/stock-price  非小号股价手动设值 */
+/** GET /admin/stock-price  当前股价配置 */
+admin.get("/stock-price", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  return c.json(await getStockQuote(c.env));
+});
+
+/** POST /admin/stock-price  WTO 股价手动兜底设值 */
 admin.post("/stock-price", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
@@ -154,12 +162,24 @@ admin.post("/stock-price", async (c) => {
   if (typeof p !== "number" || !Number.isFinite(p) || p <= 0) {
     return c.json({ error: "bad price" }, 400);
   }
-  await c.env.DB.prepare(
-    "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('stock_price_usdt', ?, ?, ?)",
-  )
-    .bind(String(p), owner, Math.floor(Date.now() / 1000))
-    .run();
-  return c.json({ priceUsdt: p });
+  return c.json(await setManualStockPrice(c.env, p, owner));
+});
+
+/** POST /admin/stock-price/mode  自动同步开关 */
+admin.post("/stock-price/mode", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  const body = (await c.req.json().catch(() => ({}))) as { mode?: string };
+  if (body.mode !== "auto" && body.mode !== "manual") return c.json({ error: "bad mode" }, 400);
+  return c.json(await setStockQuoteMode(c.env, body.mode as StockQuoteMode, owner));
+});
+
+/** POST /admin/stock-price/sync  立即从 Yahoo Finance 同步 WTO 股价 */
+admin.post("/stock-price/sync", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  const result = await syncStockQuote(c.env, { force: true, updatedBy: owner });
+  return c.json(result);
 });
 
 /** GET /admin/lottery-config / POST  彩票区间 + 票价 */

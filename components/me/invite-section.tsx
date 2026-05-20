@@ -3,20 +3,38 @@
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import { QRCodeSVG } from "qrcode.react";
-import { Copy, Share2, QrCode } from "lucide-react";
+import { Copy, Loader2, Share2, QrCode } from "lucide-react";
 import Swal from "sweetalert2";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useLocale } from "@/components/locale-provider";
+import { useSiweJwt } from "@/lib/hooks/use-siwe";
+import { api, endpoints } from "@/lib/api";
 
 export function InviteSection() {
   const { address, isConnected } = useAccount();
+  const { jwt, signIn } = useSiweJwt();
   const { t } = useLocale();
   const [origin, setOrigin] = useState("");
+  const [code, setCode] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") setOrigin(window.location.origin);
   }, []);
+
+  useEffect(() => {
+    if (!isConnected || !address) return;
+    let cancelled = false;
+    (async () => {
+      const token = jwt ?? (await signIn());
+      if (!token || cancelled) return;
+      const r = await api.get<{ code: string }>(endpoints.referralCode, token).catch(() => null);
+      if (!cancelled) setCode(r?.code ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, isConnected, jwt, signIn]);
 
   if (!isConnected || !address) {
     return (
@@ -26,7 +44,7 @@ export function InviteSection() {
     );
   }
 
-  const link = `${origin}/?ref=${address}`;
+  const link = code ? `${origin}/?ref=${code}` : "";
 
   const copy = async (text: string, msg: string) => {
     await navigator.clipboard.writeText(text);
@@ -61,7 +79,7 @@ export function InviteSection() {
         <CardContent className="flex flex-col items-center py-6">
           <div className="rounded-2xl border border-white/10 bg-white p-3">
             <QRCodeSVG
-              value={link}
+              value={link || origin || "https://hotshort.app"}
               title={t("me.invite.qrHint")}
               size={200}
               level="M"
@@ -76,7 +94,7 @@ export function InviteSection() {
               <QrCode className="h-3 w-3" /> {t("me.invite.qrHint")}
             </div>
             <div className="mt-1 font-mono text-[11px] text-white/50">
-              ref = {address.slice(0, 8)}...{address.slice(-6)}
+              {code ? `ref = ${code}` : <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" />}
             </div>
           </div>
         </CardContent>
@@ -87,14 +105,14 @@ export function InviteSection() {
           <div>
             <div className="mb-1 text-[10px] uppercase tracking-widest text-white/40">{t("me.invite.linkLabel")}</div>
             <div className="break-all rounded-lg border border-white/5 bg-black/40 p-2.5 font-mono text-[11px] text-white/70">
-              {link}
+              {link || t("common.loading")}
             </div>
           </div>
           <div className="flex gap-2">
-            <Button onClick={() => copy(link, t("me.invite.copied"))} className="flex-1">
+            <Button onClick={() => copy(link, t("me.invite.copied"))} disabled={!link} className="flex-1">
               <Copy className="h-4 w-4" /> {t("me.invite.copyLink")}
             </Button>
-            <Button onClick={share} variant="outline" className="flex-1">
+            <Button onClick={share} disabled={!link} variant="outline" className="flex-1">
               <Share2 className="h-4 w-4" /> {t("me.invite.share")}
             </Button>
           </div>

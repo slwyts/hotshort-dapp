@@ -1,17 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
 import { formatUnits } from "viem";
 import { StakeForm } from "@/components/stake/stake-form";
-import { OrderList } from "@/components/stake/order-list";
 import { PageShell } from "@/components/page-shell";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { useLocale } from "@/components/locale-provider";
 import { api, endpoints } from "@/lib/api";
 import Swal from "sweetalert2";
 
 export default function StakePage() {
-  const [refreshKey, setRefreshKey] = useState(0);
   const { signIn, jwt } = useSiweJwt();
   const { t } = useLocale();
 
@@ -64,7 +64,6 @@ export default function StakePage() {
         color: "#fff",
       });
     }
-    setRefreshKey((k) => k + 1);
   };
 
   return (
@@ -72,7 +71,17 @@ export default function StakePage() {
       <h1 className="mb-3 text-xl font-black">{t("stake.title")}</h1>
       <div className="space-y-4">
         <StakeForm onDeposited={onDeposited} />
-        <OrderList refreshKey={refreshKey} />
+        <Card>
+          <CardContent className="flex items-center justify-between gap-3 py-4">
+            <div>
+              <div className="text-sm font-bold">订单详情</div>
+              <div className="mt-0.5 text-xs text-white/45">质押进度、到期收益和领取都在订单中心查看</div>
+            </div>
+            <Link href="/me?tab=orders&type=stake">
+              <Button size="sm" variant="outline">查看订单</Button>
+            </Link>
+          </CardContent>
+        </Card>
       </div>
     </PageShell>
   );

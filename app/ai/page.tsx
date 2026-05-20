@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useState } from "react";
 import { useAccount, useReadContract, useWriteContract } from "wagmi";
 import { formatUnits, keccak256, parseUnits, toHex } from "viem";
@@ -227,6 +228,17 @@ export default function AiPage() {
       <p className="mt-4 text-center text-[11px] text-white/40">
         {t("ai.referralTip")}
       </p>
+      <Card className="mt-3">
+        <CardContent className="flex items-center justify-between gap-3 py-4">
+          <div>
+            <div className="text-sm font-bold">套餐订单</div>
+            <div className="mt-0.5 text-xs text-white/45">查看 WTO 股票释放进度和交易详情</div>
+          </div>
+          <Link href="/me?tab=orders&type=ai">
+            <Button size="sm" variant="outline">查看订单</Button>
+          </Link>
+        </CardContent>
+      </Card>
     </PageShell>
   );
 }

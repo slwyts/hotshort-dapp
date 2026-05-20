@@ -20,6 +20,14 @@ CREATE TABLE IF NOT EXISTS referral_paths (
   bound_at INTEGER NOT NULL
 );
 
+-- 邀请短码映射，分享链接不暴露钱包地址
+CREATE TABLE IF NOT EXISTS referral_codes (
+  code TEXT PRIMARY KEY,
+  user TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_referral_codes_user ON referral_codes(user);
+
 -- 质押订单
 CREATE TABLE IF NOT EXISTS stake_orders (
   id TEXT PRIMARY KEY,
@@ -59,6 +67,21 @@ CREATE TABLE IF NOT EXISTS ai_orders (
 CREATE INDEX IF NOT EXISTS idx_ai_user ON ai_orders(user);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_source_tx ON ai_orders(source_tx_hash);
 
+-- AI 套餐赠送股票释放计划
+CREATE TABLE IF NOT EXISTS ai_stock_releases (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL,
+  user TEXT NOT NULL,
+  release_index INTEGER NOT NULL,
+  stock_amount TEXT NOT NULL,
+  unlocks_at INTEGER NOT NULL,
+  released_at INTEGER,
+  created_at INTEGER NOT NULL,
+  UNIQUE(order_id, release_index)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_releases_user ON ai_stock_releases(user, released_at, unlocks_at);
+CREATE INDEX IF NOT EXISTS idx_ai_releases_due ON ai_stock_releases(released_at, unlocks_at);
+
 -- 股票持仓总账
 CREATE TABLE IF NOT EXISTS stock_holdings (
   user TEXT PRIMARY KEY,
@@ -68,21 +91,19 @@ CREATE TABLE IF NOT EXISTS stock_holdings (
 );
 CREATE INDEX IF NOT EXISTS idx_stock_holdings_total ON stock_holdings(total_stock);
 
--- HS -> 股票闪兑锁仓订单
-CREATE TABLE IF NOT EXISTS stock_swap_locks (
+-- HS -> 股票闪兑流水（兑换后立即可用）
+CREATE TABLE IF NOT EXISTS stock_swaps (
   id TEXT PRIMARY KEY,
   user TEXT NOT NULL,
   hs_in TEXT NOT NULL,
-  stock_locked TEXT NOT NULL,
+  stock_out TEXT NOT NULL,
   hs_price_usdt TEXT NOT NULL,
   stock_price_usdt TEXT NOT NULL,
   swapped_at INTEGER NOT NULL,
-  unlocks_at INTEGER NOT NULL,
-  unlocked INTEGER NOT NULL DEFAULT 0,
   source_tx_hash TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_swap_user ON stock_swap_locks(user, unlocked);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_swap_source_tx ON stock_swap_locks(source_tx_hash);
+CREATE INDEX IF NOT EXISTS idx_stock_swaps_user ON stock_swaps(user, swapped_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_swaps_source_tx ON stock_swaps(source_tx_hash);
 
 -- 每日股票分红池快照
 CREATE TABLE IF NOT EXISTS ai_dividend_pool_daily (
@@ -278,6 +299,9 @@ CREATE INDEX IF NOT EXISTS idx_claim_user ON claim_signatures(user, used_at);
 -- 默认后台配置
 INSERT OR IGNORE INTO admin_config (key, value, updated_by, updated_at) VALUES
   ('stock_price_usdt', '1', 'init', strftime('%s','now')),
+  ('stock_symbol', 'WTO', 'init', strftime('%s','now')),
+  ('stock_price_provider', 'manual', 'init', strftime('%s','now')),
+  ('stock_quote_mode', 'auto', 'init', strftime('%s','now')),
   ('stock_volume_min_usdt', '100000', 'init', strftime('%s','now')),
   ('stock_volume_max_usdt', '200000', 'init', strftime('%s','now')),
   ('stock_dividend_ratio_bps', '100', 'init', strftime('%s','now')),

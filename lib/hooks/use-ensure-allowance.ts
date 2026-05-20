@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
+import { maxUint256 } from "viem";
 import { ERC20_ABI } from "@/lib/contracts/abis";
 
 /**
@@ -22,6 +23,7 @@ export function useEnsureAllowance() {
       token: `0x${string}`;
       spender: `0x${string}`;
       amount: bigint;
+      exact?: boolean;
     }): Promise<void> => {
       if (!address) throw new Error("wallet not connected");
       if (!publicClient) throw new Error("public client unavailable");
@@ -34,11 +36,13 @@ export function useEnsureAllowance() {
       })) as bigint;
       if (current >= params.amount) return;
 
+      const approveAmount = params.exact ? params.amount : maxUint256;
+
       const hash = await writeContractAsync({
         address: params.token,
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [params.spender, params.amount],
+        args: [params.spender, approveAmount],
       });
       await publicClient.waitForTransactionReceipt({ hash });
     },

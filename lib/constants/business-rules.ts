@@ -37,6 +37,10 @@ export const STAKE_BURN_DIVIDEND_BPS = 500;
 export const STAKE_BURN_DIVIDEND_MIN_HS_USDT = 10;
 
 // ===== §2.1 AI 量化套餐 =====
+export const STOCK_SYMBOL = "WTO";
+export const STOCK_DISPLAY_NAME = "WTO";
+export const STOCK_QUOTE_PROVIDER = "Yahoo Finance";
+
 export const AI_TIERS = [
   { key: "genesis", label: "创世", usdt: 5000, stockGrantBps: 5000 }, // 50%
   { key: "glory", label: "荣耀", usdt: 2000, stockGrantBps: 2000 },   // 20%
@@ -45,6 +49,22 @@ export const AI_TIERS = [
   { key: "pioneer", label: "开拓者", usdt: 100, stockGrantBps: 0 },   // 无赠送
 ] as const;
 export type AiTierKey = (typeof AI_TIERS)[number]["key"];
+
+// ===== §2.1.1 AI 套餐赠送股票释放 =====
+/**
+ * 套餐赠送股票锁 24 个月：第 3/6/9/12/15/18/21 个月各释放 10%，第 24 个月释放剩余 30%。
+ * 每日分红、团队 STOCK 奖励和 HS 闪兑得到的股票不锁。
+ */
+export const AI_PACKAGE_STOCK_RELEASE_SCHEDULE = [
+  { month: 3, bps: 1000 },
+  { month: 6, bps: 1000 },
+  { month: 9, bps: 1000 },
+  { month: 12, bps: 1000 },
+  { month: 15, bps: 1000 },
+  { month: 18, bps: 1000 },
+  { month: 21, bps: 1000 },
+  { month: 24, bps: 3000 },
+] as const;
 
 // ===== §2.2 每日股票分红比例（bps） =====
 export const AI_DIVIDEND_TIER_SHARE_BPS: Record<AiTierKey, number> = {
@@ -91,8 +111,8 @@ export const AI_REFERRAL_3GEN_BPS: Record<AiTierKey, [number, number, number]> =
 export const AI_3GEN_DOWNGRADE_BPS = 5000; // 50%
 
 // ===== §2.5 闪兑 =====
-/** HS → 股票闪兑后锁仓 2 年（秒） */
-export const AI_SWAP_LOCK_SECONDS = 2 * 365 * 24 * 3600;
+/** HS → 股票闪兑后立即可用，不进入 locked_stock。保留常量用于旧测试/旧 UI 兼容。 */
+export const AI_SWAP_LOCK_SECONDS = 0;
 
 // ===== §3 彩票（薄饼克隆） =====
 /** 周奖池补给（HS） */

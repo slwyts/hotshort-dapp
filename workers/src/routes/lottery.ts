@@ -64,7 +64,13 @@ lottery.get("/round", async (c) => {
   let myTickets: unknown[] = [];
   if (user) {
     const mt = await c.env.DB.prepare(
-      "SELECT id, round_no, numbers, paid_hs, hit_digits, prize_hs, claimed FROM lottery_tickets WHERE user = ? ORDER BY bought_at DESC LIMIT 100",
+      `SELECT t.id, t.round_no, t.numbers, t.paid_hs, t.hit_digits, t.prize_hs, t.claimed,
+              r.drawn_at, r.winning_number
+         FROM lottery_tickets t
+         LEFT JOIN lottery_rounds r ON r.round_no = t.round_no
+        WHERE t.user = ?
+        ORDER BY t.bought_at DESC
+        LIMIT 100`,
     )
       .bind(user)
       .all();
@@ -80,8 +86,8 @@ lottery.get("/round", async (c) => {
 
 /**
  * POST /lottery/buy  用户已链上 deposit(purpose=3) 后通知 Worker 入账
- * 入参: { sourceTxHash, numbers: '123456', count?: 1 }
- *   - count 一般为 1；多张同号一次性买
+ * 入参: { sourceTxHash, entries: ['123456', '654321'] }
+ * 兼容旧入参: { sourceTxHash, numbers: '123456', count?: 1 }，表示多张同号。
  *   - 70% 入奖池 / 30% 黑洞由 cron 在结算时根据 deposit 总量切；这里只入门票流水
  */
 lottery.post("/buy", async (c) => {
@@ -93,20 +99,23 @@ lottery.post("/buy", async (c) => {
     sourceTxHash?: string;
     numbers?: string;
     count?: number;
+    entries?: string[];
   };
-  if (!/^\d{6}$/.test(body.numbers ?? "")) return c.json({ error: "bad numbers (6 digits)" }, 400);
   if (!body.sourceTxHash || !/^0x[a-fA-F0-9]{64}$/.test(body.sourceTxHash)) {
     return c.json({ error: "bad tx hash" }, 400);
   }
-  const count = Math.max(1, Math.floor(body.count ?? 1));
-  if (count > 100) return c.json({ error: "count too large" }, 400);
+  const entries = Array.isArray(body.entries)
+    ? body.entries.map((n) => String(n).trim()).filter(Boolean)
+    : Array.from({ length: Math.max(1, Math.floor(body.count ?? 1)) }, () => body.numbers ?? "");
+  if (entries.length === 0 || entries.length > 100) return c.json({ error: "count too large" }, 400);
+  if (entries.some((n) => !/^\d{6}$/.test(n))) return c.json({ error: "bad numbers (6 digits)" }, 400);
 
   await upsertUser(c.env, user);
   const round = await getOrCreateRound(c.env);
   const now = await nowSeconds(c.env);
 
-  // 累计 paid_hs = ticketPriceHs * count
-  const paidWei = BigInt(round.ticket_price_hs) * BigInt(count);
+  // 累计 paid_hs = ticketPriceHs * entries.length
+  const paidWei = BigInt(round.ticket_price_hs) * BigInt(entries.length);
 
   const duplicate = await c.env.DB.prepare("SELECT id FROM lottery_tickets WHERE source_tx_hash = ? LIMIT 1")
     .bind(body.sourceTxHash)
@@ -121,14 +130,16 @@ lottery.post("/buy", async (c) => {
     purpose: 3,
   });
 
-  for (let i = 0; i < count; i++) {
+  const ticketIds: string[] = [];
+  for (const numbers of entries) {
     const id = ulid();
     await c.env.DB.prepare(
       `INSERT INTO lottery_tickets (id, round_no, user, numbers, paid_hs, bought_at, source_tx_hash)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(id, round.roundNo, user, body.numbers!, round.ticket_price_hs, now, body.sourceTxHash)
+      .bind(id, round.roundNo, user, numbers, round.ticket_price_hs, now, body.sourceTxHash)
       .run();
+    ticketIds.push(id);
   }
 
   // 累计 70% 入奖池；剩余 30% 留在 Vault 作为黑洞/金库待处理余额。
@@ -143,7 +154,9 @@ lottery.post("/buy", async (c) => {
 
   return c.json({
     roundNo: round.roundNo,
-    count,
+    count: entries.length,
+    entries,
+    ticketIds,
     paidHs: paidWei.toString(),
     poolAdditionHs: toPool.toString(),
   });

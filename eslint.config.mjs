@@ -14,6 +14,7 @@ export default defineConfig([
     "workers/**",
     "contracts/**",
     "lib/forge-std/**",
+    "lib/openzeppelin-contracts/**",
     "script/**",
     "broadcast/**",
   ]),

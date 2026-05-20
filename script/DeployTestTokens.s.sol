@@ -38,6 +38,9 @@ contract DeployTestTokens is Script {
         console2.log("Router    :", router);
         console2.log("ChainId   :", block.chainid);
 
+        bool writeJson = vm.envOr("WRITE_DEPLOYED_JSON", true);
+        if (!writeJson) return (testHs, testUsdt, pair);
+
         string memory key = "deployed";
         vm.serializeAddress(key, "testHs", address(testHs));
         vm.serializeAddress(key, "testUsdt", address(testUsdt));

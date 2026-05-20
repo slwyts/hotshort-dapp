@@ -6,6 +6,7 @@ import { upsertUser, requireBoundUser } from "../lib/users";
 import {
   addStock,
   getHoldings,
+  getStockQuote,
   getStockPriceUsdt,
   getHsPriceUsdt,
   usdtToStockWei,
@@ -16,12 +17,12 @@ import { ulid } from "../lib/ulid";
 import { nowSeconds, todayBeijing } from "../lib/time";
 import { createClaimSignature } from "../lib/claims";
 import { addRewardClaim, markRewardRowsClaimed, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
+import { createAiStockReleaseSchedule } from "../lib/ai-releases";
 import { hsWeiToUsdtWei, stockWeiToUsdtWei, usdtWeiToHsWei } from "../lib/pricing";
 import { readTokenBalance } from "../lib/token-balance";
 import { verifyVaultDeposit } from "../lib/vault-events";
 import {
   AI_TIERS,
-  AI_SWAP_LOCK_SECONDS,
   AI_AIRDROP_BASE_APR_BPS,
   AI_AIRDROP_MIN_DAILY_STOCK,
   AI_AIRDROP_MIN_HS_USDT,
@@ -49,8 +50,36 @@ ai.get("/orders", async (c) => {
     "SELECT id, tier, usdt_in, stock_granted, created_at, source_tx_hash FROM ai_orders WHERE user = ? ORDER BY created_at DESC",
   )
     .bind(user)
-    .all();
-  return c.json({ orders: rs.results ?? [] });
+    .all<{ id: string; tier: string; usdt_in: string; stock_granted: string; created_at: number; source_tx_hash: string }>();
+
+  const orders = [];
+  for (const order of rs.results ?? []) {
+    const releases = await c.env.DB.prepare(
+      `SELECT release_index, stock_amount, unlocks_at, released_at
+         FROM ai_stock_releases WHERE order_id = ? ORDER BY release_index ASC`,
+    )
+      .bind(order.id)
+      .all<{ release_index: number; stock_amount: string; unlocks_at: number; released_at: number | null }>();
+    let releasedStock = 0n;
+    let lockedStock = 0n;
+    let nextUnlocksAt: number | null = null;
+    for (const release of releases.results ?? []) {
+      const amount = BigInt(release.stock_amount);
+      if (release.released_at) releasedStock += amount;
+      else {
+        lockedStock += amount;
+        if (!nextUnlocksAt || release.unlocks_at < nextUnlocksAt) nextUnlocksAt = release.unlocks_at;
+      }
+    }
+    orders.push({
+      ...order,
+      released_stock: releasedStock.toString(),
+      locked_stock: lockedStock.toString(),
+      next_unlocks_at: nextUnlocksAt,
+      releases: releases.results ?? [],
+    });
+  }
+  return c.json({ orders });
 });
 
 /**
@@ -111,7 +140,15 @@ ai.post("/buy", async (c) => {
     )
     .run();
 
-  if (stockGrantWei > 0n) await addStock(c.env, user, stockGrantWei);
+  if (stockGrantWei > 0n) {
+    await addStock(c.env, user, stockGrantWei, true);
+    await createAiStockReleaseSchedule(c.env, {
+      orderId: id,
+      user,
+      totalStock: stockGrantWei,
+      createdAt: now,
+    });
+  }
 
   await recordDirectReferral(c.env, { buyer: user, tier, usdtIn: usdtInWei, orderId: id });
 
@@ -125,7 +162,7 @@ ai.post("/buy", async (c) => {
 });
 
 /**
- * POST /ai/swap  HS → 股票闪兑（锁仓 2 年）
+ * POST /ai/swap  HS → 股票闪兑（立即可用）
  * 入参: { sourceTxHash, hsAmountWei }
  */
 ai.post("/swap", async (c) => {
@@ -142,7 +179,7 @@ ai.post("/swap", async (c) => {
     return c.json({ error: "bad tx hash" }, 400);
   }
 
-  const duplicate = await c.env.DB.prepare("SELECT id FROM stock_swap_locks WHERE source_tx_hash = ?")
+  const duplicate = await c.env.DB.prepare("SELECT id FROM stock_swaps WHERE source_tx_hash = ?")
     .bind(body.sourceTxHash)
     .first<{ id: string }>();
   if (duplicate) return c.json({ error: "tx already recorded" }, 409);
@@ -167,18 +204,17 @@ ai.post("/swap", async (c) => {
 
   const id = ulid();
   const now = await nowSeconds(c.env);
-  const unlocks = now + AI_SWAP_LOCK_SECONDS;
   await c.env.DB.prepare(
-    `INSERT INTO stock_swap_locks
-       (id, user, hs_in, stock_locked, hs_price_usdt, stock_price_usdt, swapped_at, unlocks_at, source_tx_hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO stock_swaps
+       (id, user, hs_in, stock_out, hs_price_usdt, stock_price_usdt, swapped_at, source_tx_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, user, hsWei.toString(), stockOut.toString(), String(hsPrice), String(stockPrice), now, unlocks, body.sourceTxHash)
+    .bind(id, user, hsWei.toString(), stockOut.toString(), String(hsPrice), String(stockPrice), now, body.sourceTxHash)
     .run();
 
-  await addStock(c.env, user, stockOut, true);
+  await addStock(c.env, user, stockOut, false);
 
-  return c.json({ id, stockLocked: stockOut.toString(), unlocksAt: unlocks });
+  return c.json({ id, stockOut: stockOut.toString(), stockLocked: "0", unlocksAt: null });
 });
 
 /**
@@ -194,8 +230,10 @@ ai.get("/dividend/today", async (c) => {
     .bind(today, user)
     .first<{ date: string; stock_share: string; claimed: number }>();
   const h = await getHoldings(c.env, user);
+  const stock = await getStockQuote(c.env);
   return c.json({
     today,
+    stock,
     holdings: { totalStock: h.total.toString(), lockedStock: h.locked.toString() },
     dividend: div ?? { date: today, stock_share: "0", claimed: 0 },
   });

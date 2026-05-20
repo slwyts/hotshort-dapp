@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAccount, useReadContract, useWriteContract } from "wagmi";
 import { formatUnits, parseUnits, keccak256, toHex } from "viem";
-import { Loader2, ArrowDownUp, Lock } from "lucide-react";
+import { Loader2, ArrowDownUp } from "lucide-react";
 import Swal from "sweetalert2";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,6 @@ import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
 import { useContracts } from "@/lib/runtime-config";
-import { AI_SWAP_LOCK_SECONDS } from "@/lib/constants/business-rules";
 import { formatNumber } from "@/lib/utils";
 
 export default function SwapPage() {
@@ -187,9 +186,8 @@ export default function SwapPage() {
             </div>
           </div>
 
-          <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-[11px] text-yellow-200">
-            <Lock className="mr-1 inline h-3 w-3" />
-            {t("ai.swap.lockHint", { days: Math.round(AI_SWAP_LOCK_SECONDS / 86400) })}
+          <div className="rounded-md border border-[#00c6ff]/30 bg-[#00c6ff]/5 px-3 py-2 text-[11px] text-[#00c6ff]">
+            {t("ai.swap.availableHint")}
           </div>
 
           <Button onClick={submit} disabled={submitting} size="lg" className="w-full">

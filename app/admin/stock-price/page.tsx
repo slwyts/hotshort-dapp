@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, Save, Coins, ChevronLeft } from "lucide-react";
+import { Loader2, Save, Coins, ChevronLeft, RefreshCw } from "lucide-react";
 import Swal from "sweetalert2";
 import { AdminGuard } from "@/components/admin-guard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,30 +10,59 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
+import { cn, formatNumber } from "@/lib/utils";
+
+type StockQuoteMode = "auto" | "manual";
+
+interface StockQuoteResponse {
+  symbol: string;
+  name: string;
+  priceUsdt: number;
+  source: string;
+  updatedAt: number | null;
+  syncedAt: number | null;
+  fallback: boolean;
+  mode: StockQuoteMode;
+}
+
+interface StockQuoteSyncResponse {
+  synced: boolean;
+  reason: "ok" | "manual" | "fresh" | "fetch_failed";
+  quote: StockQuoteResponse;
+}
 
 export default function AdminStockPricePage() {
   const { jwt, signIn } = useSiweJwt();
   const [price, setPrice] = useState("");
+  const [mode, setMode] = useState<StockQuoteMode>("auto");
+  const [quote, setQuote] = useState<StockQuoteResponse | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
-  const refresh = async () => {
+  const applyQuote = useCallback((next: StockQuoteResponse) => {
+    setQuote(next);
+    setPrice(String(next.priceUsdt));
+    setMode(next.mode);
+    setUpdatedAt(next.syncedAt ?? next.updatedAt);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const token = jwt ?? (await signIn());
+    if (!token) return;
     setLoading(true);
     try {
-      const r = await api.get<{ priceUsdt: number; updatedAt: number | null }>(
-        endpoints.stockPrice,
-      );
-      setPrice(String(r.priceUsdt));
-      setUpdatedAt(r.updatedAt);
+      const r = await api.get<StockQuoteResponse>(endpoints.adminStockPrice, token);
+      applyQuote(r);
     } finally {
       setLoading(false);
     }
-  };
+  }, [applyQuote, jwt, signIn]);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
 
   const save = async () => {
     const token = jwt ?? (await signIn());
@@ -45,20 +74,63 @@ export default function AdminStockPricePage() {
     }
     setSaving(true);
     try {
-      await api.post(endpoints.adminStockPrice, { priceUsdt: num }, token);
+      const r = await api.post<StockQuoteResponse>(endpoints.adminStockPrice, { priceUsdt: num }, token);
+      applyQuote(r);
       await Swal.fire({
         icon: "success",
         title: "保存成功",
-        text: "新股价立即生效，影响每日分红和闪兑折算",
+        text: "手动兜底价已更新",
         background: "#141419",
         color: "#fff",
         confirmButtonColor: "#b829ff",
       });
-      await refresh();
     } catch (e) {
       await Swal.fire({ icon: "error", title: "保存失败", text: (e as Error).message, background: "#141419", color: "#fff" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const changeMode = async (nextMode: StockQuoteMode) => {
+    const token = jwt ?? (await signIn());
+    if (!token || nextMode === mode) return;
+    setSaving(true);
+    try {
+      const r = await api.post<StockQuoteResponse>(endpoints.adminStockPriceMode, { mode: nextMode }, token);
+      applyQuote(r);
+      await Swal.fire({
+        icon: "success",
+        title: nextMode === "auto" ? "已开启自动同步" : "已切换为手动模式",
+        background: "#141419",
+        color: "#fff",
+        confirmButtonColor: "#b829ff",
+      });
+    } catch (e) {
+      await Swal.fire({ icon: "error", title: "切换失败", text: (e as Error).message, background: "#141419", color: "#fff" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const syncNow = async () => {
+    const token = jwt ?? (await signIn());
+    if (!token) return;
+    setSyncing(true);
+    try {
+      const r = await api.post<StockQuoteSyncResponse>(endpoints.adminStockPriceSync, {}, token);
+      applyQuote(r.quote);
+      await Swal.fire({
+        icon: r.synced ? "success" : "warning",
+        title: r.synced ? "同步成功" : "同步未完成",
+        text: r.synced ? `WTO 当前价格 $${formatNumber(r.quote.priceUsdt, 4)}` : "行情源暂时不可用，继续使用当前价格",
+        background: "#141419",
+        color: "#fff",
+        confirmButtonColor: "#b829ff",
+      });
+    } catch (e) {
+      await Swal.fire({ icon: "error", title: "同步失败", text: (e as Error).message, background: "#141419", color: "#fff" });
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -72,12 +144,12 @@ export default function AdminStockPricePage() {
           <Coins className="h-6 w-6 text-[#00c6ff]" /> 股价管理
         </h1>
         <p className="mt-1 text-sm text-white/50">
-          手动调整当前股票价格，修改后立即生效
+          WTO 股价用于套餐赠股、HS 闪兑和每日分红折算
         </p>
 
         <Card className="mt-8 max-w-xl">
           <CardHeader>
-            <CardTitle>当前股价</CardTitle>
+            <CardTitle>WTO 股价</CardTitle>
             {updatedAt && (
               <p className="text-xs text-white/40">
                 上次更新：{new Date(updatedAt * 1000).toLocaleString("zh-CN")}
@@ -89,8 +161,40 @@ export default function AdminStockPricePage() {
               <Loader2 className="mx-auto h-5 w-5 animate-spin text-white/40" />
             ) : (
               <>
+                <div className="grid grid-cols-2 gap-2 rounded-lg border border-white/5 bg-black/30 p-2 text-sm">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-widest text-white/35">当前价格</div>
+                    <div className="mt-1 text-xl font-black text-white">${formatNumber(quote?.priceUsdt ?? Number(price || 0), 4)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-widest text-white/35">来源</div>
+                    <div className="mt-1 text-sm font-bold text-white/80">{quote?.source ?? "manual"}</div>
+                    <div className="mt-0.5 text-[11px] text-white/40">{quote?.fallback ? "兜底价" : "实时行情"}</div>
+                  </div>
+                </div>
+
                 <div>
-                  <label className="text-sm font-medium text-white/70">每股价格</label>
+                  <label className="text-sm font-medium text-white/70">同步模式</label>
+                  <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg border border-white/5 bg-black/30 p-1">
+                    {(["auto", "manual"] as const).map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => void changeMode(item)}
+                        disabled={saving}
+                        className={cn(
+                          "h-9 rounded-md text-sm font-bold transition disabled:opacity-60",
+                          mode === item ? "bg-[#b829ff]/25 text-white ring-1 ring-[#b829ff]/40" : "text-white/45 hover:bg-white/5",
+                        )}
+                      >
+                        {item === "auto" ? "自动同步" : "手动模式"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-white/70">手动兜底价</label>
                   <div className="mt-1 flex items-center gap-2">
                     <Input
                       type="number"
@@ -102,10 +206,16 @@ export default function AdminStockPricePage() {
                     <span className="text-sm text-white/40">USDT</span>
                   </div>
                 </div>
-                <Button onClick={save} disabled={saving} className="ml-auto">
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  保存
-                </Button>
+                <div className="flex justify-end gap-2">
+                  <Button onClick={syncNow} disabled={syncing} variant="outline">
+                    {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    立即同步
+                  </Button>
+                  <Button onClick={save} disabled={saving}>
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    保存兜底价
+                  </Button>
+                </div>
               </>
             )}
           </CardContent>

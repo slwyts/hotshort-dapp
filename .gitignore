@@ -46,6 +46,7 @@ out/
 broadcast/
 cache_forge/
 lib/forge-std/
+lib/contracts/deployed.testnet.json
 
 # wrangler / workers
 .wrangler/

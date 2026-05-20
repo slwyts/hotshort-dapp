@@ -25,6 +25,7 @@ import {
 
 interface DividendResponse {
   today: string;
+  stock?: { symbol: string; name: string; priceUsdt: number; source: string; updatedAt: number | null; fallback: boolean };
   holdings: { totalStock: string; lockedStock: string };
   dividend: { date: string; stock_share: string; claimed: number };
 }
@@ -178,6 +179,7 @@ export default function DividendPage() {
   const totalStock = Number(formatUnits(BigInt(data.holdings.totalStock), 18));
   const lockedStock = Number(formatUnits(BigInt(data.holdings.lockedStock), 18));
   const todayShare = Number(formatUnits(BigInt(data.dividend.stock_share), 18));
+  const stockPrice = data.stock?.priceUsdt ?? 1;
   const unlocked = AI_AIRDROP_MIN_DAILY_STOCK <= totalStock;
 
   return (
@@ -195,20 +197,24 @@ export default function DividendPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-2">
-            <Stat label={t("ai.div.holding")} value={formatNumber(totalStock, 2)} unit={t("ai.div.unit")} />
+            <Stat label={t("ai.div.holding")} value={formatNumber(totalStock, 2)} unit="WTO" suffix={`≈ $${formatNumber(totalStock * stockPrice, 2)}`} />
             <Stat label={t("ai.div.locked")} value={formatNumber(lockedStock, 2)} unit={t("ai.div.unit")} subtle />
             <Stat
               label={t("ai.div.todayShare")}
               value={formatNumber(todayShare, 2)}
-              unit={t("ai.div.unit")}
+              unit="WTO"
               accent
-              suffix={data.dividend.claimed ? t("ai.div.claimed") : ""}
+              suffix={`${data.dividend.claimed ? t("ai.div.claimed") : ""} ≈ $${formatNumber(todayShare * stockPrice, 2)}`}
             />
             <Stat
               label={t("ai.div.pending")}
               value={data.dividend.claimed ? "0" : formatNumber(todayShare, 2)}
-              unit={t("ai.div.unit")}
+              unit="WTO"
             />
+          </div>
+
+          <div className="rounded-md border border-white/5 bg-black/30 px-3 py-2 text-[11px] text-white/45">
+            WTO 价格：${formatNumber(stockPrice, 4)} · {data.stock?.source ?? "manual"}{data.stock?.fallback ? " 兜底价" : ""}
           </div>
 
           <Button

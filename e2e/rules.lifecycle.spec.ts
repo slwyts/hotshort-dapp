@@ -2,7 +2,6 @@ import { expect, test } from "@playwright/test";
 import { parseEther, type Address } from "viem";
 import { VAULT_ABI } from "../lib/contracts/abis";
 import {
-  AI_SWAP_LOCK_SECONDS,
   BPS_DENOMINATOR,
   LOTTERY_PRIZE_BPS,
   LOTTERY_TO_POOL_BPS,
@@ -51,6 +50,15 @@ type AiBuyResponse = {
   tier: string;
   usdtIn: string;
   stockGranted: string;
+};
+
+type AiOrderResponse = {
+  id: string;
+  stock_granted: string;
+  released_stock: string;
+  locked_stock: string;
+  next_unlocks_at: number | null;
+  releases: { release_index: number; stock_amount: string; unlocks_at: number; released_at: number | null }[];
 };
 
 type HoldingsResponse = {
@@ -107,6 +115,21 @@ async function expectNonceConsumed(claim: VaultClaim): Promise<void> {
     args: [BigInt(claim.nonce)],
   });
   expect(used).toBe(true);
+}
+
+async function getReferralCode(jwt: string): Promise<string> {
+  const result = await apiRequest<{ code: string }>("/referral/code", { headers: bearer(jwt) });
+  expect(result.code).toMatch(/^[A-Z0-9]{4,12}$/);
+  return result.code;
+}
+
+async function bindByReferralCode(jwt: string, referralCode: string): Promise<void> {
+  const result = await apiRequest<{ ok: boolean; referrer: string }>("/referral/bind", {
+    method: "POST",
+    headers: bearer(jwt),
+    body: JSON.stringify({ referralCode }),
+  });
+  expect(result.ok).toBe(true);
 }
 
 async function createStakeOrder(params: {
@@ -174,6 +197,7 @@ test.describe("README rule lifecycle scripts", () => {
     await resetAndFund([ALICE, DEPLOYER]);
     const adminJwt = await signIn(DEPLOYER);
     const aliceJwt = await signIn(ALICE);
+    await bindByReferralCode(aliceJwt, await getReferralCode(adminJwt));
 
     const ratePayload = {
       rates: [
@@ -271,6 +295,15 @@ test.describe("README rule lifecycle scripts", () => {
     const bobJwt = await signIn(BOB);
     const charlieJwt = await signIn(CHARLIE);
 
+    const rootCode = await getReferralCode(adminJwt);
+    const resolvedRoot = await apiRequest<{ referrer: string }>(`/referral/resolve/${rootCode}`);
+    expect(resolvedRoot.referrer).toBe(DEPLOYER.address.toLowerCase());
+    await bindByReferralCode(aliceJwt, rootCode);
+    const aliceCode = await getReferralCode(aliceJwt);
+    await bindByReferralCode(bobJwt, aliceCode);
+    const bobCode = await getReferralCode(bobJwt);
+    await bindByReferralCode(charlieJwt, bobCode);
+
     await apiRequest("/admin/stock-price", {
       method: "POST",
       headers: bearer(adminJwt),
@@ -300,6 +333,26 @@ test.describe("README rule lifecycle scripts", () => {
     expect(BigInt(aliceBuy.stockGranted)).toBe(parseEther("2500"));
     expect(BigInt(bobBuy.stockGranted)).toBe(parseEther("400"));
     expect(BigInt(charlieBuy.stockGranted)).toBe(parseEther("100"));
+
+    const aliceOrdersAfterBuy = await apiRequest<{ orders: AiOrderResponse[] }>("/ai/orders", { headers: bearer(aliceJwt) });
+    const alicePackageOrder = aliceOrdersAfterBuy.orders.find((order) => order.id === aliceBuy.id);
+    expect(alicePackageOrder?.releases).toHaveLength(8);
+    expect(BigInt(alicePackageOrder?.locked_stock ?? "0")).toBe(parseEther("2500"));
+    expect(BigInt(alicePackageOrder?.released_stock ?? "0")).toBe(0n);
+
+    const beforePackageRelease = await apiRequest<HoldingsResponse>("/ai/holdings", { headers: bearer(aliceJwt) });
+    await advanceTime(3 * 30 * 86400 + 1);
+    const releaseCron = await runTestCron<{ releasedRows: number; releasedStock: string }>("ai-release");
+    expect(releaseCron.result.releasedRows).toBe(3);
+    expect(BigInt(releaseCron.result.releasedStock)).toBe(parseEther("300"));
+    const afterPackageRelease = await apiRequest<HoldingsResponse>("/ai/holdings", { headers: bearer(aliceJwt) });
+    expect(BigInt(beforePackageRelease.lockedStock) - BigInt(afterPackageRelease.lockedStock)).toBe(parseEther("250"));
+
+    const aliceOrdersAfterRelease = await apiRequest<{ orders: AiOrderResponse[] }>("/ai/orders", { headers: bearer(aliceJwt) });
+    const releasedPackageOrder = aliceOrdersAfterRelease.orders.find((order) => order.id === aliceBuy.id);
+    expect(BigInt(releasedPackageOrder?.released_stock ?? "0")).toBe(parseEther("250"));
+    expect(releasedPackageOrder?.releases[0]?.released_at).toBeTruthy();
+    expect(releasedPackageOrder?.next_unlocks_at).toBeGreaterThan(releasedPackageOrder?.releases[0]?.unlocks_at ?? 0);
 
     const referralTree = await apiRequest<{ counts: { gen1: number; gen2: number; gen3: number } }>("/referral/tree", {
       headers: bearer(aliceJwt),
@@ -363,20 +416,25 @@ test.describe("README rule lifecycle scripts", () => {
     const beforeSwapHoldings = await apiRequest<HoldingsResponse>("/ai/holdings", { headers: bearer(aliceJwt) });
     const swapAmount = parseEther("1000");
     const swapTxHash = await depositToVault(ALICE, HS_TOKEN as Address, swapAmount, 5);
-    const swap = await apiRequest<{ id: string; stockLocked: string; unlocksAt: number }>("/ai/swap", {
+    const swap = await apiRequest<{ id: string; stockOut: string; stockLocked: string; unlocksAt: null }>("/ai/swap", {
       method: "POST",
       headers: bearer(aliceJwt),
       body: JSON.stringify({ sourceTxHash: swapTxHash, hsAmountWei: swapAmount.toString() }),
     });
-    expect(BigInt(swap.stockLocked)).toBe(parseEther("1"));
-    expect(swap.unlocksAt - beforeSwapTime.nowSeconds).toBe(AI_SWAP_LOCK_SECONDS);
+    expect(beforeSwapTime.nowSeconds).toBeGreaterThan(0);
+    expect(BigInt(swap.stockOut)).toBe(parseEther("1"));
+    expect(BigInt(swap.stockLocked)).toBe(0n);
+    expect(swap.unlocksAt).toBeNull();
     const afterSwapHoldings = await apiRequest<HoldingsResponse>("/ai/holdings", { headers: bearer(aliceJwt) });
-    expect(BigInt(afterSwapHoldings.lockedStock) - BigInt(beforeSwapHoldings.lockedStock)).toBe(parseEther("1"));
+    expect(BigInt(afterSwapHoldings.totalStock) - BigInt(beforeSwapHoldings.totalStock)).toBe(parseEther("1"));
+    expect(BigInt(afterSwapHoldings.lockedStock) - BigInt(beforeSwapHoldings.lockedStock)).toBe(0n);
   });
 
   test("lottery lifecycle covers buy, pending pancake sync, draw settlement, prize claim, and duplicate guard", async () => {
-    await resetAndFund([ALICE]);
+    await resetAndFund([ALICE, DEPLOYER]);
+    const adminJwt = await signIn(DEPLOYER);
     const aliceJwt = await signIn(ALICE);
+    await bindByReferralCode(aliceJwt, await getReferralCode(adminJwt));
 
     const initialRound = await apiRequest<LotteryRoundResponse>("/lottery/round", { headers: bearer(aliceJwt) });
     await setTestLotteryWinning(null);
@@ -384,14 +442,16 @@ test.describe("README rule lifecycle scripts", () => {
     expect(pendingDraw.result).toMatchObject({ pending: true, reason: "pancake result unavailable" });
 
     const ticketPrice = BigInt(initialRound.current.ticketPriceHs);
-    const ticketTxHash = await depositToVault(ALICE, HS_TOKEN as Address, ticketPrice, 3);
-    const bought = await apiRequest<{ roundNo: number; count: number; paidHs: string; poolAdditionHs: string }>("/lottery/buy", {
+    const ticketTxHash = await depositToVault(ALICE, HS_TOKEN as Address, ticketPrice * 2n, 3);
+    const bought = await apiRequest<{ roundNo: number; count: number; entries: string[]; paidHs: string; poolAdditionHs: string }>("/lottery/buy", {
       method: "POST",
       headers: bearer(aliceJwt),
-      body: JSON.stringify({ sourceTxHash: ticketTxHash, numbers: "123456", count: 1 }),
+      body: JSON.stringify({ sourceTxHash: ticketTxHash, entries: ["123456", "654321"] }),
     });
     expect(bought.roundNo).toBe(initialRound.current.roundNo);
-    expect(BigInt(bought.poolAdditionHs)).toBe((ticketPrice * BigInt(LOTTERY_TO_POOL_BPS)) / BigInt(BPS_DENOMINATOR));
+    expect(bought.count).toBe(2);
+    expect(bought.entries).toEqual(["123456", "654321"]);
+    expect(BigInt(bought.poolAdditionHs)).toBe((ticketPrice * 2n * BigInt(LOTTERY_TO_POOL_BPS)) / BigInt(BPS_DENOMINATOR));
 
     await setTestLotteryWinning("123456");
     const draw = await runTestCron<{ roundNo: number; winning: string; settledTickets: number }>("lottery");
@@ -431,6 +491,13 @@ test.describe("README rule lifecycle scripts", () => {
     const aliceJwt = await signIn(ALICE);
     const bobJwt = await signIn(BOB);
     const charlieJwt = await signIn(CHARLIE);
+
+    const rootCode = await getReferralCode(adminJwt);
+    await bindByReferralCode(aliceJwt, rootCode);
+    const aliceCode = await getReferralCode(aliceJwt);
+    await bindByReferralCode(bobJwt, aliceCode);
+    const bobCode = await getReferralCode(bobJwt);
+    await bindByReferralCode(charlieJwt, bobCode);
 
     await buyAiPackage({ account: ALICE, jwt: aliceJwt, tier: "genesis", usdt: parseEther("5000") });
     await createStakeOrder({

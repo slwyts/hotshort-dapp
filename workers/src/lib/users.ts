@@ -3,6 +3,45 @@ import { ulid } from "./ulid";
 import { nowSeconds } from "./time";
 import { readVaultOwner } from "./vault-owner";
 
+const REFERRAL_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+function randomReferralCode(length = 6): string {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  let code = "";
+  for (const byte of bytes) code += REFERRAL_CODE_ALPHABET[byte % REFERRAL_CODE_ALPHABET.length];
+  return code;
+}
+
+export async function ensureReferralCode(env: Env, user: string): Promise<string> {
+  const addr = user.toLowerCase();
+  const existing = await env.DB.prepare("SELECT code FROM referral_codes WHERE user = ?")
+    .bind(addr)
+    .first<{ code: string }>();
+  if (existing?.code) return existing.code;
+
+  const now = await nowSeconds(env);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const code = randomReferralCode(attempt < 5 ? 6 : 8);
+    const inserted = await env.DB.prepare(
+      "INSERT OR IGNORE INTO referral_codes (code, user, created_at) VALUES (?, ?, ?)",
+    )
+      .bind(code, addr, now)
+      .run();
+    if (inserted.meta.changes > 0) return code;
+  }
+  throw new Error("failed to create referral code");
+}
+
+export async function resolveReferralCode(env: Env, code: string | null | undefined): Promise<string | null> {
+  const normalized = (code ?? "").trim().toUpperCase();
+  if (!/^[A-Z0-9]{4,12}$/.test(normalized)) return null;
+  const row = await env.DB.prepare("SELECT user FROM referral_codes WHERE code = ?")
+    .bind(normalized)
+    .first<{ user: string }>();
+  return row?.user?.toLowerCase() ?? null;
+}
+
 /**
  * 检查 referrer 是否可被引用：
  *   - 必须为合法地址且不等于自己

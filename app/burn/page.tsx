@@ -36,6 +36,20 @@ interface Leaderboard {
   rows: { user: string; burn_hs: number | string }[];
 }
 
+interface BurnRound {
+  round: number;
+  current: {
+    totalBurnHs: string;
+    weightPoolHs: string;
+    promotionPoolHs: string;
+    stakePoolHs: string;
+    aiPoolHs: string;
+    top10PoolHs: string;
+    blackHoleHs: string;
+    top10CarryoverHs: string;
+  };
+}
+
 const ALLOC_TABLE = [
   { key: "blackHole", labelKey: "burn.alloc.blackHole", bps: BURN_ALLOCATION_BPS.blackHole },
   { key: "weight", labelKey: "burn.alloc.weight", bps: BURN_ALLOCATION_BPS.weight },
@@ -56,6 +70,7 @@ export default function BurnPage() {
 
   const [me, setMe] = useState<BurnMe | null>(null);
   const [board, setBoard] = useState<Leaderboard | null>(null);
+  const [round, setRound] = useState<BurnRound | null>(null);
   const [loading, setLoading] = useState(false);
   const [hsAmount, setHsAmount] = useState("100");
   const [submitting, setSubmitting] = useState(false);
@@ -67,12 +82,14 @@ export default function BurnPage() {
     let token = jwt;
     if (!token && isConnected) token = await signIn();
     try {
-      const [m, lb] = await Promise.all([
+      const [m, lb, roundInfo] = await Promise.all([
         token ? api.get<BurnMe>("/burn/me", token) : Promise.resolve(null),
         api.get<Leaderboard>("/burn/leaderboard"),
+        api.get<BurnRound>(endpoints.burnRound),
       ]);
       setMe(m);
       setBoard(lb);
+      setRound(roundInfo);
     } catch {
       /* ignore */
     } finally {
@@ -210,6 +227,8 @@ export default function BurnPage() {
 
   const totalBurn = me ? Number(formatUnits(BigInt(me.totalBurnedHs), 18)) : 0;
   const top10Pending = me ? Number(formatUnits(BigInt(me.top10PendingHs), 18)) : 0;
+  const currentWeeklyBurn = round ? Number(formatUnits(BigInt(round.current.totalBurnHs), 18)) : 0;
+  const currentTop10Pool = round ? Number(formatUnits(BigInt(round.current.top10PoolHs), 18)) : 0;
 
   return (
     <PageShell>
@@ -268,6 +287,10 @@ export default function BurnPage() {
           <CardDescription>{t("burn.allocDesc")}</CardDescription>
         </CardHeader>
         <CardContent>
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <Stat label="本周总奖池" value={formatNumber(currentWeeklyBurn, 0)} unit="HS" accent />
+            <Stat label="Top10 周池" value={formatNumber(currentTop10Pool, 2)} unit="HS" />
+          </div>
           <div className="grid grid-cols-3 gap-1.5 text-sm">
             {ALLOC_TABLE.map((a) => (
               <div key={a.key} className="rounded-md border border-white/5 bg-black/40 p-2.5">

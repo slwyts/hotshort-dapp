@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createPublicClient, createWalletClient, defineChain, encodeAbiParameters, http, keccak256, parseEther, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { ERC20_ABI, VAULT_ABI } from "../lib/contracts/abis";
-import { ANVIL_CHAIN_ID, ANVIL_RPC, HS_TOKEN, PANCAKE_PAIR, USDT_TOKEN } from "./constants";
+import { ANVIL_CHAIN_ID, ANVIL_RPC, DEPLOYER, HS_TOKEN, PANCAKE_PAIR, USDT_TOKEN } from "./constants";
 
 export const WORKER_URL = process.env.WORKER_URL ?? "http://localhost:8787";
 
@@ -111,13 +111,34 @@ export async function setTokenBalance(token: Address, holder: Address, balance: 
   await rpcCall("anvil_setStorageAt", [token.toLowerCase(), storageSlot(holder, balanceSlot), storageValue(balance)]);
 }
 
+async function transferTokenFromDeployer(token: Address, to: Address, amount: bigint): Promise<boolean> {
+  try {
+    const { walletClient } = accountClient(DEPLOYER);
+    const hash = await walletClient.writeContract({
+      address: token.toLowerCase() as Address,
+      abi: ERC20_ABI,
+      functionName: "transfer",
+      args: [to, amount],
+    });
+    await publicClient.waitForTransactionReceipt({ hash });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function fundErc20(token: Address, holder: Address, amount: bigint, fallbackBalanceSlot: bigint): Promise<void> {
+  const transferred = await transferTokenFromDeployer(token, holder, amount);
+  if (!transferred) await setTokenBalance(token, holder, amount, fallbackBalanceSlot);
+}
+
 export async function fundLifecycleAccount(user: Address, vault: Address): Promise<void> {
   await rpcCall("anvil_setBalance", [user, "0x56BC75E2D63100000"]);
-  await setTokenBalance(USDT_TOKEN as Address, user, parseEther("1000000"), 1n);
-  await setTokenBalance(HS_TOKEN as Address, user, parseEther("100000000"), 0n);
+  await fundErc20(USDT_TOKEN as Address, user, parseEther("1000000"), 1n);
+  await fundErc20(HS_TOKEN as Address, user, parseEther("100000000"), 0n);
   await setTokenBalance(PANCAKE_PAIR as Address, user, parseEther("1000"), 1n);
-  await setTokenBalance(HS_TOKEN as Address, vault, parseEther("1000000000000"), 0n);
-  await setTokenBalance(USDT_TOKEN as Address, vault, parseEther("1000000000"), 1n);
+  await fundErc20(HS_TOKEN as Address, vault, parseEther("1000000000000"), 0n);
+  await fundErc20(USDT_TOKEN as Address, vault, parseEther("1000000000"), 1n);
 }
 
 export async function fundStakeLifecycleAccount(user: Address, vault: Address): Promise<void> {

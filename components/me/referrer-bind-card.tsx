@@ -24,7 +24,16 @@ const BIND_ERROR_KEY: Record<string, string> = {
   "already bound": "me.team.bindAlreadyBound",
   "cannot refer self": "me.team.bindSelf",
   "invalid referrer": "me.team.bindInvalid",
+  "invalid referral code": "me.team.bindInvalid",
 };
+
+function isAddress(value: string): boolean {
+  return /^0x[a-f0-9]{40}$/.test(value);
+}
+
+function isReferralCode(value: string): boolean {
+  return /^[a-z0-9]{4,12}$/i.test(value);
+}
 
 export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
   const { address, isConnected } = useAccount();
@@ -70,12 +79,13 @@ export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
   };
 
   const bind = async () => {
-    const ref = refInput.trim().toLowerCase();
-    if (!/^0x[a-f0-9]{40}$/.test(ref)) {
+    const raw = refInput.trim();
+    const ref = raw.toLowerCase();
+    if (!isAddress(ref) && !isReferralCode(raw)) {
       await Swal.fire({ icon: "error", title: t("me.team.bindInvalid"), background: "#141419", color: "#fff" });
       return;
     }
-    if (address && ref === address.toLowerCase()) {
+    if (address && isAddress(ref) && ref === address.toLowerCase()) {
       await Swal.fire({ icon: "error", title: t("me.team.bindSelf"), background: "#141419", color: "#fff" });
       return;
     }
@@ -83,7 +93,11 @@ export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
     if (!token) return;
     setBinding(true);
     try {
-      await api.post(endpoints.referralBind, { referrer: ref }, token);
+      await api.post(
+        endpoints.referralBind,
+        isAddress(ref) ? { referrer: ref } : { referralCode: raw.toUpperCase() },
+        token,
+      );
       await Swal.fire({
         icon: "success",
         title: t("me.team.bindSuccess"),
@@ -123,7 +137,7 @@ export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
             type="text"
             value={refInput}
             onChange={(e) => setRefInput(e.target.value)}
-            placeholder="0x..."
+            placeholder={t("me.team.bindPlaceholder")}
             spellCheck={false}
             className="flex-1 rounded-md border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#b829ff]"
           />

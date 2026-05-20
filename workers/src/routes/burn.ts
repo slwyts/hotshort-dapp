@@ -9,6 +9,7 @@ import { createClaimSignature } from "../lib/claims";
 import { markRewardRowsClaimed, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
 import { verifyVaultBurn } from "../lib/vault-events";
 import {
+  BURN_ALLOCATION_BPS,
   BURN_AIRDROP_MIN_USDT,
   BURN_PERSONAL_DOUBLE_OUT_BPS,
   BPS_DENOMINATOR,
@@ -56,31 +57,86 @@ burn.get("/me", async (c) => {
     .bind(user)
     .all<{ reward_hs: string }>();
   let top10Pending = 0n;
+  let top10Reward = 0n;
   for (const row of pendingRows.results ?? []) top10Pending += BigInt(row.reward_hs);
+  top10Reward = top10Pending;
 
   const rewardRows = await c.env.DB.prepare(
-    `SELECT reward_amount FROM reward_claims
+    `SELECT kind, reward_amount FROM reward_claims
       WHERE user = ? AND claimed = 0 AND reward_token = 'HS'
         AND kind IN ('burn-weight', 'stake-burn-dividend', 'ai-burn-airdrop')`,
   )
     .bind(user)
-    .all<{ reward_amount: string }>();
-  for (const row of rewardRows.results ?? []) top10Pending += BigInt(row.reward_amount);
+    .all<{ kind: string; reward_amount: string }>();
+  let weightReward = 0n;
+  let stakeReward = 0n;
+  let aiReward = 0n;
+  for (const row of rewardRows.results ?? []) {
+    const amount = BigInt(row.reward_amount);
+    top10Pending += amount;
+    if (row.kind === "burn-weight") weightReward += amount;
+    else if (row.kind === "stake-burn-dividend") stakeReward += amount;
+    else if (row.kind === "ai-burn-airdrop") aiReward += amount;
+  }
 
   const referralRows = await c.env.DB.prepare(
     "SELECT reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0 AND reward_token = 'HS'",
   )
     .bind(user)
     .all<{ reward_amount: string }>();
-  for (const row of referralRows.results ?? []) top10Pending += BigInt(row.reward_amount);
+  let referralReward = 0n;
+  for (const row of referralRows.results ?? []) {
+    const amount = BigInt(row.reward_amount);
+    top10Pending += amount;
+    referralReward += amount;
+  }
 
   return c.json({
     totalBurnedHs: status.total.toString(),
     personalClaimedHs: status.claimed.toString(),
     out: !!status.out,
     top10PendingHs: top10Pending.toString(),
+    pendingBreakdown: {
+      top10Hs: top10Reward.toString(),
+      weightHs: weightReward.toString(),
+      promotionHs: referralReward.toString(),
+      stakeHs: stakeReward.toString(),
+      aiHs: aiReward.toString(),
+    },
     eligibleAirdrop: status.total >= BigInt(Math.floor(BURN_AIRDROP_MIN_USDT * 1e18)),
   });
+});
+
+/** GET /burn/round  当前周奖池估算 + 上一轮结算快照 */
+burn.get("/round", async (c) => {
+  const round = await getCurrentBurnRound(c.env);
+  const rs = await c.env.DB.prepare(
+    "SELECT hs_amount FROM burn_records WHERE settled_round IS NULL",
+  ).all<{ hs_amount: string }>();
+  let totalBurn = 0n;
+  for (const row of rs.results ?? []) totalBurn += BigInt(row.hs_amount);
+
+  const lastCarryRow = await c.env.DB.prepare("SELECT top10_carryover_hs FROM burn_rounds WHERE round = ?")
+    .bind(round - 1)
+    .first<{ top10_carryover_hs: string }>();
+  const carryover = BigInt(lastCarryRow?.top10_carryover_hs ?? "0");
+  const alloc = {
+    blackHoleHs: ((totalBurn * BigInt(BURN_ALLOCATION_BPS.blackHole)) / BigInt(BPS_DENOMINATOR)).toString(),
+    weightPoolHs: ((totalBurn * BigInt(BURN_ALLOCATION_BPS.weight)) / BigInt(BPS_DENOMINATOR)).toString(),
+    promotionPoolHs: ((totalBurn * BigInt(BURN_ALLOCATION_BPS.promotion)) / BigInt(BPS_DENOMINATOR)).toString(),
+    stakePoolHs: ((totalBurn * BigInt(BURN_ALLOCATION_BPS.stake)) / BigInt(BPS_DENOMINATOR)).toString(),
+    aiPoolHs: ((totalBurn * BigInt(BURN_ALLOCATION_BPS.aiStock)) / BigInt(BPS_DENOMINATOR)).toString(),
+    top10PoolHs: (((totalBurn * BigInt(BURN_ALLOCATION_BPS.top10)) / BigInt(BPS_DENOMINATOR)) + carryover).toString(),
+    top10CarryoverHs: carryover.toString(),
+  };
+
+  const last = await c.env.DB.prepare(
+    `SELECT round, closed_at, total_burn_hs, weight_pool_hs, promotion_pool_hs,
+            stake_pool_hs, ai_pool_hs, top10_pool_hs, black_hole_hs, top10_carryover_hs
+       FROM burn_rounds WHERE settled = 1 ORDER BY round DESC LIMIT 1`,
+  ).first();
+
+  return c.json({ round, current: { totalBurnHs: totalBurn.toString(), ...alloc }, lastSettled: last ?? null });
 });
 
 /** GET /burn/leaderboard  当周 Top 100（实时） */
@@ -96,6 +152,19 @@ burn.get("/leaderboard", async (c) => {
     .sort((a, b) => (BigInt(a.burn_hs) === BigInt(b.burn_hs) ? a.user.localeCompare(b.user) : BigInt(a.burn_hs) > BigInt(b.burn_hs) ? -1 : 1))
     .slice(0, 100);
   return c.json({ round, rows });
+});
+
+/** GET /burn/records  当前用户燃烧流水 */
+burn.get("/records", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  const rs = await c.env.DB.prepare(
+    `SELECT id, hs_amount, settled_round, claimed_individual, burned_at, source_tx_hash
+       FROM burn_records WHERE user = ? ORDER BY burned_at DESC LIMIT 100`,
+  )
+    .bind(user)
+    .all();
+  return c.json({ records: rs.results ?? [] });
 });
 
 /**

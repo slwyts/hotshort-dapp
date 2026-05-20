@@ -13,12 +13,11 @@ interface ConfigSnapshot {
   volumeMin: number;
   volumeMax: number;
   ratioBps: number;
-  stockPrice: number;
 }
 
 async function readConfig(env: Env): Promise<ConfigSnapshot> {
   const rows = await env.DB.prepare(
-    "SELECT key, value FROM admin_config WHERE key IN ('stock_volume_min_usdt','stock_volume_max_usdt','stock_dividend_ratio_bps','stock_price_usdt')",
+    "SELECT key, value FROM admin_config WHERE key IN ('stock_volume_min_usdt','stock_volume_max_usdt','stock_dividend_ratio_bps')",
   ).all<{ key: string; value: string }>();
   const map = new Map<string, string>();
   for (const r of rows.results ?? []) map.set(r.key, r.value);
@@ -26,7 +25,6 @@ async function readConfig(env: Env): Promise<ConfigSnapshot> {
     volumeMin: Number(map.get("stock_volume_min_usdt") ?? 100_000),
     volumeMax: Number(map.get("stock_volume_max_usdt") ?? 200_000),
     ratioBps: Number(map.get("stock_dividend_ratio_bps") ?? 100),
-    stockPrice: Number(map.get("stock_price_usdt") ?? 1),
   };
 }
 
@@ -49,7 +47,7 @@ export async function settleAiDividend(env: Env): Promise<{ date: string; totalS
   if (exists?.settled) return null;
 
   const cfg = await readConfig(env);
-  const stockPrice = cfg.stockPrice > 0 ? cfg.stockPrice : await getStockPriceUsdt(env);
+  const stockPrice = await getStockPriceUsdt(env);
   if (cfg.volumeMin <= 0 || cfg.volumeMax < cfg.volumeMin) return null;
   const targetVolumeUsdt = cfg.volumeMin + Math.random() * (cfg.volumeMax - cfg.volumeMin);
   const totalPoolUsdt = (targetVolumeUsdt * cfg.ratioBps) / BPS_DENOMINATOR;

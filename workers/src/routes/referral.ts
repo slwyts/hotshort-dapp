@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
-import { upsertUser, resolveReferrer } from "../lib/users";
+import { ensureReferralCode, resolveReferralCode, upsertUser, resolveReferrer } from "../lib/users";
 import { readVaultOwner } from "../lib/vault-owner";
 
 export const referral = new Hono<{ Bindings: Env }>();
@@ -89,6 +89,22 @@ referral.get("/me", async (c) => {
   });
 });
 
+/** GET /referral/code  获取当前用户短邀请码 */
+referral.get("/code", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  await upsertUser(c.env, user);
+  const code = await ensureReferralCode(c.env, user);
+  return c.json({ code });
+});
+
+/** GET /referral/resolve/:code  解析短邀请码，前端用于展示确认 */
+referral.get("/resolve/:code", async (c) => {
+  const referrer = await resolveReferralCode(c.env, c.req.param("code"));
+  if (!referrer) return c.json({ error: "invalid referral code" }, 404);
+  return c.json({ referrer });
+});
+
 /**
  * POST /referral/bind  { referrer }
  * 用户登录后手动绑定上级。规则：
@@ -103,8 +119,9 @@ referral.get("/me", async (c) => {
 referral.post("/bind", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
-  const body = (await c.req.json().catch(() => ({}))) as { referrer?: string };
-  const ref = (body.referrer ?? "").trim().toLowerCase();
+  const body = (await c.req.json().catch(() => ({}))) as { referrer?: string; referralCode?: string };
+  const fromCode = body.referralCode ? await resolveReferralCode(c.env, body.referralCode) : null;
+  const ref = (fromCode ?? body.referrer ?? "").trim().toLowerCase();
   if (!/^0x[a-f0-9]{40}$/.test(ref)) return c.json({ error: "invalid referrer" }, 400);
   if (ref === user) return c.json({ error: "cannot refer self" }, 400);
 

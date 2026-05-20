@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAccount, useWriteContract } from "wagmi";
 import { formatUnits, keccak256, toHex } from "viem";
-import { Loader2, Ticket as TicketIcon, Trophy, Dice5 } from "lucide-react";
+import { Loader2, Ticket as TicketIcon, Trophy, Dice5, Plus, Trash2 } from "lucide-react";
 import Swal from "sweetalert2";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,8 @@ interface Round {
     hit_digits: string | null;
     prize_hs: string | null;
     claimed: number;
+    drawn_at: number | null;
+    winning_number: string | null;
   }[];
 }
 
@@ -57,8 +59,7 @@ export default function LotteryPage() {
   const ensureAllowance = useEnsureAllowance();
   const [data, setData] = useState<Round | null>(null);
   const [loading, setLoading] = useState(false);
-  const [numbers, setNumbers] = useState(randomNumbers());
-  const [count, setCount] = useState(1);
+  const [entries, setEntries] = useState<string[]>([randomNumbers()]);
   const [submitting, setSubmitting] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -82,7 +83,7 @@ export default function LotteryPage() {
       await Swal.fire({ icon: "warning", title: t("common.connectFirst"), background: "#141419", color: "#fff" });
       return;
     }
-    if (!/^\d{6}$/.test(numbers)) {
+    if (entries.length === 0 || entries.length > 100 || entries.some((numbers) => !/^\d{6}$/.test(numbers))) {
       await Swal.fire({ icon: "warning", title: t("lot.invalid"), background: "#141419", color: "#fff" });
       return;
     }
@@ -93,7 +94,7 @@ export default function LotteryPage() {
 
     setSubmitting(true);
     try {
-      const totalHsWei = BigInt(data.current.ticketPriceHs) * BigInt(count);
+      const totalHsWei = BigInt(data.current.ticketPriceHs) * BigInt(entries.length);
       Swal.fire({
         title: t("lot.txApprove"),
         background: "#141419",
@@ -110,7 +111,7 @@ export default function LotteryPage() {
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading(),
       });
-      const ref = keccak256(toHex(`lottery|${address}|${numbers}|${data.current.roundNo}|${Date.now()}`));
+      const ref = keccak256(toHex(`lottery|${address}|${entries.join(",")}|${data.current.roundNo}|${Date.now()}`));
       const txHash = await writeContractAsync({
         address: vault,
         abi: VAULT_ABI,
@@ -122,16 +123,15 @@ export default function LotteryPage() {
         endpoints.lotteryBuy,
         {
           sourceTxHash: txHash,
-          numbers,
-          count,
+          entries,
         },
         token,
       );
 
       await Swal.fire({
         icon: "success",
-        title: t("lot.success.title", { count }),
-        html: `${t("lot.success.body", { numbers: `<strong style="color:#b829ff;font-family:monospace">${numbers}</strong>` })}<br/>
+        title: t("lot.success.title", { count: entries.length }),
+        html: `${t("lot.success.body", { numbers: entries.map((item) => `<strong style="color:#b829ff;font-family:monospace">${item}</strong>`).join(" / ") })}<br/>
                ${t("lot.success.next")}`,
         background: "#141419",
         color: "#fff",
@@ -204,7 +204,18 @@ export default function LotteryPage() {
   const poolHs = Number(formatUnits(BigInt(data.current.poolHs), 18));
   const ticketHs = Number(formatUnits(BigInt(data.current.ticketPriceHs), 18));
   const winnableTickets = data.myTickets.filter((t) => t.prize_hs && BigInt(t.prize_hs) > 0n && !t.claimed);
-  const numberDigits = numbers.padEnd(6, " ").split("");
+
+  const updateEntry = (index: number, value: string) => {
+    setEntries((items) => items.map((item, i) => i === index ? value.replace(/\D/g, "").slice(0, 6) : item));
+  };
+
+  const randomEntry = (index: number) => {
+    setEntries((items) => items.map((item, i) => i === index ? randomNumbers() : item));
+  };
+
+  const removeEntry = (index: number) => {
+    setEntries((items) => items.length <= 1 ? items : items.filter((_, i) => i !== index));
+  };
 
   return (
     <PageShell>
@@ -233,57 +244,53 @@ export default function LotteryPage() {
             <label className="mb-2 block text-xs uppercase tracking-widest text-white/50">
               {t("lot.numbers")}
             </label>
-            {/* 6 个独立数字格子 */}
-            <div className="flex items-center justify-between gap-1.5">
-              {numberDigits.map((d, i) => (
-                <div
-                  key={i}
-                  className="flex h-12 w-10 items-center justify-center rounded-lg border-2 border-white/10 bg-black/40 text-2xl font-black text-white tabular-nums"
-                  style={{ fontFamily: "Orbitron, sans-serif" }}
-                >
-                  {d.trim()}
-                </div>
-              ))}
+            <div className="space-y-3">
+              {entries.map((entry, index) => {
+                const digits = entry.padEnd(6, " ").split("");
+                return (
+                  <div key={index} className="rounded-lg border border-white/5 bg-black/25 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-white/40">#{index + 1}</span>
+                      <div className="flex gap-1.5">
+                        <Button variant="outline" size="sm" onClick={() => randomEntry(index)}>
+                          <Dice5 className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => removeEntry(index)} disabled={entries.length <= 1}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-1.5">
+                      {digits.map((d, i) => (
+                        <div
+                          key={i}
+                          className="flex h-10 w-9 items-center justify-center rounded-lg border-2 border-white/10 bg-black/40 text-xl font-black text-white tabular-nums"
+                          style={{ fontFamily: "Orbitron, sans-serif" }}
+                        >
+                          {d.trim()}
+                        </div>
+                      ))}
+                    </div>
+                    <Input
+                      value={entry}
+                      maxLength={6}
+                      onChange={(e) => updateEntry(index, e.target.value)}
+                      className="mt-2 h-10 text-center font-mono"
+                      placeholder={t("lot.placeholder")}
+                    />
+                  </div>
+                );
+              })}
             </div>
-            {/* 隐藏 input 维持响应 */}
-            <Input
-              value={numbers}
-              maxLength={6}
-              onChange={(e) => setNumbers(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              className="mt-2 h-10 text-center font-mono"
-              placeholder={t("lot.placeholder")}
-            />
-            <div className="mt-2 flex justify-between gap-2">
-              <Button variant="outline" size="sm" onClick={() => setNumbers(randomNumbers())} className="flex-1">
-                <Dice5 className="h-3.5 w-3.5" /> {t("lot.random")}
+            <div className="mt-2 flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setEntries((items) => [...items, randomNumbers()].slice(0, 100))} className="flex-1">
+                <Plus className="h-3.5 w-3.5" /> 添加一注
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setNumbers("")} className="flex-1">
-                {t("lot.clear")}
-              </Button>
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-xs uppercase tracking-widest text-white/50">
-              {t("lot.count")}
-            </label>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setCount(Math.max(1, count - 1))}>
-                −
-              </Button>
-              <Input
-                type="number"
-                min={1}
-                max={100}
-                value={count}
-                onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value))))}
-                className="text-center"
-              />
-              <Button variant="outline" size="sm" onClick={() => setCount(Math.min(100, count + 1))}>
-                +
+              <Button variant="outline" size="sm" onClick={() => setEntries(entries.map(() => randomNumbers()))} className="flex-1">
+                <Dice5 className="h-3.5 w-3.5" /> 全部随机
               </Button>
             </div>
-            <p className="mt-1 text-[11px] text-white/40">{t("lot.totalCost", { usdt: count, hs: formatNumber(ticketHs * count, 0) })}</p>
+            <p className="mt-2 text-[11px] text-white/40">{t("lot.totalCost", { usdt: entries.length, hs: formatNumber(ticketHs * entries.length, 0) })}</p>
           </div>
 
           <Button onClick={buy} disabled={submitting} size="lg" className="w-full">
@@ -394,6 +401,8 @@ export default function LotteryPage() {
                     <span className={cn("font-bold tabular-nums", ticket.claimed ? "text-white/40" : "text-[#b829ff]")}>
                       +{formatNumber(Number(formatUnits(BigInt(ticket.prize_hs), 18)), 2)} HS
                     </span>
+                  ) : !ticket.drawn_at ? (
+                    <span className="text-[#00c6ff]">待开奖</span>
                   ) : (
                     <span className="text-white/30">{t("lot.notWin")}</span>
                   )}
