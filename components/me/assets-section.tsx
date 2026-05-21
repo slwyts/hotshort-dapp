@@ -2,16 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useAccount, useReadContract } from "wagmi";
 import { formatUnits } from "viem";
-import { Loader2 } from "lucide-react";
+import { ChevronRight, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { useLocale } from "@/components/locale-provider";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { ERC20_ABI } from "@/lib/contracts/abis";
 import { useContracts } from "@/lib/runtime-config";
-import { formatNumber } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 import { ReferrerBindCard } from "@/components/me/referrer-bind-card";
 
 interface Portfolio {
@@ -105,6 +106,8 @@ export function AssetsSection() {
   const stockUsdt = portfolio ? Number(portfolio.stockUsdt) : 0;
   const stockLockedUsdt = portfolio ? Number(portfolio.stockLockedUsdt) : 0;
   const pendingUsdt = portfolio ? Number(portfolio.pendingUsdt) : 0;
+  const referralPendingUsdt = portfolio ? Number(portfolio.pending.referral) : 0;
+  const pendingHref = referralPendingUsdt > 0 ? "/me?tab=team" : "/me?tab=orders";
   const hsPrice = portfolio?.hsPriceUsdt ?? 0;
 
   const usdtNum = usdtBal ? Number(formatUnits(usdtBal as bigint, 18)) : 0;
@@ -139,15 +142,16 @@ export function AssetsSection() {
             <div className="py-6 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-white/40" /></div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
-              <DappCell label={t("me.assets.staked")} valueUsdt={stakeUsdt} color="#00c6ff" />
-              <DappCell label={t("me.assets.plans")} valueUsdt={planUsdt} color="#b829ff" />
+              <DappCell label={t("me.assets.staked")} valueUsdt={stakeUsdt} color="#00c6ff" href="/me?tab=orders&type=stake" />
+              <DappCell label={t("me.assets.plans")} valueUsdt={planUsdt} color="#b829ff" href="/me?tab=orders&type=ai" />
               <DappCell
                 label={t("me.assets.stock")}
                 valueUsdt={stockUsdt}
                 hint={stockLockedUsdt > 0 ? `${t("me.assets.stockLocked")} $${formatNumber(stockLockedUsdt, 0)}` : undefined}
                 color="#f59e0b"
+                href="/ai/dividend"
               />
-              <DappCell label={t("me.assets.pending")} valueUsdt={pendingUsdt} color="#22c55e" accent />
+              <DappCell label={t("me.assets.pending")} valueUsdt={pendingUsdt} color="#22c55e" accent href={pendingHref} />
             </div>
           )}
         </CardContent>
@@ -244,27 +248,47 @@ function DappCell({
   hint,
   color,
   accent,
+  href,
 }: {
   label: string;
   valueUsdt: number;
   hint?: string;
   color: string;
   accent?: boolean;
+  href?: string;
 }) {
-  return (
-    <div
-      className={`rounded-xl border p-2.5 ${
-        accent ? "border-[#22c55e]/30 bg-[#22c55e]/5" : "border-white/5 bg-black/40"
-      }`}
-    >
-      <div className="flex items-center gap-1.5">
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
-        <span className="text-[10px] uppercase tracking-wider text-white/40">{label}</span>
+  const body = (
+    <>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />
+          <span className="min-w-0 truncate text-[10px] uppercase tracking-wider text-white/40">{label}</span>
+        </div>
+        {href && <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-white/30 transition-colors group-hover:text-white/65" />}
       </div>
       <div className={`mt-1 text-lg font-bold tabular-nums ${accent ? "text-green-400" : "text-white"}`}>
         ${valueUsdt < 1 ? valueUsdt.toFixed(2) : formatNumber(valueUsdt, 0)}
       </div>
       {hint && <div className="mt-0.5 text-[10px] text-white/30">{hint}</div>}
+    </>
+  );
+  const className = cn(
+    "group block rounded-xl border p-2.5 transition-colors",
+    accent ? "border-[#22c55e]/30 bg-[#22c55e]/5" : "border-white/5 bg-black/40",
+    href && "hover:border-white/15 hover:bg-white/[0.06]",
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {body}
+      </Link>
+    );
+  }
+
+  return (
+    <div className={className}>
+      {body}
     </div>
   );
 }

@@ -18,9 +18,36 @@ interface TreeRow {
   level3: string | null;
 }
 
+interface RewardRow {
+  reward_token: string;
+  reward_amount: string;
+  claimed: number;
+}
+
+function emptyRewardTotals() {
+  return { usdtWei: 0n, stockWei: 0n, hsWei: 0n, count: 0 };
+}
+
+function serializeRewardTotals(totals: ReturnType<typeof emptyRewardTotals>) {
+  return {
+    usdtWei: totals.usdtWei.toString(),
+    stockWei: totals.stockWei.toString(),
+    hsWei: totals.hsWei.toString(),
+    count: totals.count,
+  };
+}
+
+function addReward(totals: ReturnType<typeof emptyRewardTotals>, row: RewardRow): void {
+  const amount = BigInt(row.reward_amount);
+  if (row.reward_token === "USDT") totals.usdtWei += amount;
+  else if (row.reward_token === "STOCK") totals.stockWei += amount;
+  else if (row.reward_token === "HS") totals.hsWei += amount;
+  totals.count += 1;
+}
+
 /**
  * GET /referral/tree
- * 当前用户作为上级时，三代下线列表 + 各代人数 + 累计返佣（USDT）。
+ * 当前用户作为上级时，三代下线列表 + 各代人数 + 累计/待领返佣。
  */
 referral.get("/tree", async (c) => {
   const user = await requireUser(c);
@@ -43,27 +70,23 @@ referral.get("/tree", async (c) => {
     else if (r.level3 === user) gen3.push(r.user);
   }
 
-  // 累计返佣 USDT
-  const reward = await c.env.DB.prepare(
-    `SELECT
-       COALESCE(SUM(CASE WHEN reward_token = 'USDT' THEN CAST(reward_amount AS REAL) ELSE 0 END), 0) AS usdt,
-       COALESCE(SUM(CASE WHEN reward_token = 'STOCK' THEN CAST(reward_amount AS REAL) ELSE 0 END), 0) AS stock,
-       COALESCE(SUM(CASE WHEN reward_token = 'HS' THEN CAST(reward_amount AS REAL) ELSE 0 END), 0) AS hs,
-       COUNT(*) AS count
-     FROM referral_rewards WHERE user = ?`,
+  const rewards = await c.env.DB.prepare(
+    "SELECT reward_token, reward_amount, claimed FROM referral_rewards WHERE user = ?",
   )
     .bind(user)
-    .first<{ usdt: number; stock: number; hs: number; count: number }>();
+    .all<RewardRow>();
+  const rewardsTotal = emptyRewardTotals();
+  const rewardsPending = emptyRewardTotals();
+  for (const row of rewards.results ?? []) {
+    addReward(rewardsTotal, row);
+    if (!row.claimed) addReward(rewardsPending, row);
+  }
 
   return c.json({
     counts: { gen1: gen1.length, gen2: gen2.length, gen3: gen3.length },
     members: { gen1, gen2, gen3 },
-    rewardsTotal: {
-      usdtWei: reward?.usdt.toString() ?? "0",
-      stockWei: reward?.stock.toString() ?? "0",
-      hsWei: reward?.hs.toString() ?? "0",
-      count: reward?.count ?? 0,
-    },
+    rewardsTotal: serializeRewardTotals(rewardsTotal),
+    rewardsPending: serializeRewardTotals(rewardsPending),
   });
 });
 

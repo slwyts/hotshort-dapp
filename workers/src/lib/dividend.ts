@@ -110,12 +110,10 @@ export async function settleAiDividend(env: Env): Promise<{ date: string; totalS
         .bind(date, user, tier, mergedShare.toString(), date, user)
         .run();
 
-      // 三代返佣（基数为该用户份额的 USDT 等值）
-      const shareUsdt = (share * BigInt(Math.floor(stockPrice * 1e18))) / 10n ** 18n;
       await recordThreeGenReferral(env, {
         source: user,
         date,
-        stockShareUsdt: shareUsdt,
+        stockShare: share,
         buyerTier: tier,
       });
       recipients++;

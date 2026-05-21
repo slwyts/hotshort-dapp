@@ -52,7 +52,7 @@ async function getUserHighestTier(env: Env, user: string): Promise<AiTierKey | n
 }
 
 /**
- * 套餐购买的直推一次性返佣（USDT 计价；以 HS 发放，由 cron 或领取时折算）。
+ * 套餐购买的直推一次性返佣（USDT 计价，USDT 领取）。
  * §2.4(1) 直推无等级压制，下级高于上级也全额拿。
  * §2.1 开拓者 (pioneer) 无返佣。
  */
@@ -94,12 +94,12 @@ export async function recordDirectReferral(env: Env, params: {
 /**
  * 每日股票分红的三代返佣。
  * §2.4(3) 仅下级等级高于自身时减半（AI_3GEN_DOWNGRADE_BPS=5000 → 50%）。
- * 基数为下级当日分得的股票（USDT 等值）。
+ * 基数为下级当日分得的 WTO 股票数量。
  */
 export async function recordThreeGenReferral(env: Env, params: {
   source: string;
   date: string;
-  stockShareUsdt: bigint;
+  stockShare: bigint;
   buyerTier: AiTierKey;
 }): Promise<void> {
   const path = await getPath(env, params.source);
@@ -117,7 +117,7 @@ export async function recordThreeGenReferral(env: Env, params: {
     const bps = bpsArr[i] ?? 0;
     if (bps === 0) continue;
 
-    let reward = (params.stockShareUsdt * BigInt(bps)) / BigInt(BPS_DENOMINATOR);
+    let reward = (params.stockShare * BigInt(bps)) / BigInt(BPS_DENOMINATOR);
     if (sourceScore > upperScore) {
       reward = (reward * BigInt(AI_3GEN_DOWNGRADE_BPS)) / BigInt(BPS_DENOMINATOR);
     }
@@ -134,7 +134,7 @@ export async function recordThreeGenReferral(env: Env, params: {
         params.source.toLowerCase(),
         `gen${i + 1}`,
         reward.toString(),
-        params.stockShareUsdt.toString(),
+        params.stockShare.toString(),
         params.date,
         now,
       )
