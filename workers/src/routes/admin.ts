@@ -6,6 +6,7 @@ import { invalidateRate } from "../lib/rates";
 import { scanGenesisTransfers } from "../lib/genesis-scan";
 import { getStockQuote, setManualStockPrice, setStockQuoteMode, syncStockQuote, type StockQuoteMode } from "../lib/stocks";
 import { readVaultOwner } from "../lib/vault-owner";
+import { ensureAgentTables, listAgentAlerts, listAgentUsers, normalizeAddress } from "../lib/agent-data";
 import {
   STAKE_ASSETS,
   STAKE_LOCK_MONTHS,
@@ -275,6 +276,73 @@ admin.get("/funds", async (c) => {
   }
   return c.json({ pending: [...pending.entries()].map(([token, amount]) => ({ token, pending: amount.toString() })) });
 });
+
+admin.get("/agent-accounts", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  await ensureAgentTables(c.env);
+  const rows = await c.env.DB.prepare(
+    "SELECT address, label, enabled, created_by, created_at, updated_at FROM agent_accounts ORDER BY updated_at DESC",
+  ).all<{ address: string; label: string | null; enabled: number; created_by: string; created_at: number; updated_at: number }>();
+  const accounts = [];
+  for (const row of rows.results ?? []) {
+    const users = await listAgentUsers(c.env, row.address);
+    const unreadAlerts = row.enabled === 1 ? (await listAgentAlerts(c.env, row.address, 500, true)).length : 0;
+    accounts.push({ ...row, teamSize: users.length, unreadAlerts });
+  }
+  return c.json({ accounts });
+});
+
+admin.post("/agent-accounts", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  await ensureAgentTables(c.env);
+  const body = (await c.req.json().catch(() => ({}))) as { address?: string; label?: string };
+  const address = normalizeAddress(body.address);
+  if (!address) return c.json({ error: "bad address" }, 400);
+  const label = typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 80) : null;
+  const now = Math.floor(Date.now() / 1000);
+  await c.env.DB.prepare(
+    `INSERT INTO agent_accounts (address, label, enabled, created_by, created_at, updated_at)
+     VALUES (?, ?, 1, ?, ?, ?)
+     ON CONFLICT(address) DO UPDATE SET label = excluded.label, enabled = 1, updated_at = excluded.updated_at`,
+  )
+    .bind(address, label, owner, now, now)
+    .run();
+  return c.json({ saved: true, address });
+});
+
+admin.patch("/agent-accounts/:address", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  await ensureAgentTables(c.env);
+  const address = normalizeAddress(c.req.param("address"));
+  if (!address) return c.json({ error: "bad address" }, 400);
+  const body = (await c.req.json().catch(() => ({}))) as { label?: string | null; enabled?: boolean };
+  const current = await c.env.DB.prepare("SELECT address, label, enabled FROM agent_accounts WHERE address = ?")
+    .bind(address)
+    .first<{ address: string; label: string | null; enabled: number }>();
+  if (!current) return c.json({ error: "not found" }, 404);
+  const label = typeof body.label === "string" ? body.label.trim().slice(0, 80) || null : current.label;
+  const enabled = typeof body.enabled === "boolean" ? (body.enabled ? 1 : 0) : current.enabled;
+  await c.env.DB.prepare("UPDATE agent_accounts SET label = ?, enabled = ?, updated_at = ? WHERE address = ?")
+    .bind(label, enabled, Math.floor(Date.now() / 1000), address)
+    .run();
+  return c.json({ saved: true, address, enabled: enabled === 1, label });
+});
+
+admin.delete("/agent-accounts/:address", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  await ensureAgentTables(c.env);
+  const address = normalizeAddress(c.req.param("address"));
+  if (!address) return c.json({ error: "bad address" }, 400);
+  await c.env.DB.prepare("UPDATE agent_accounts SET enabled = 0, updated_at = ? WHERE address = ?")
+    .bind(Math.floor(Date.now() / 1000), address)
+    .run();
+  return c.json({ saved: true, address, enabled: false });
+});
+
 admin.get("/agents", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);

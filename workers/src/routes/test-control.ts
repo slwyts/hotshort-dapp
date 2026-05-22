@@ -20,6 +20,8 @@ const OWNER = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
 
 const RESET_TABLES = [
   "claim_signatures",
+  "agent_alert_acknowledgements",
+  "agent_accounts",
   "referral_rewards",
   "stock_swaps",
   "stock_holdings",

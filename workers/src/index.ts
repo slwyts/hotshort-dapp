@@ -12,6 +12,7 @@ import { burn } from "./routes/burn";
 import { referral } from "./routes/referral";
 import { portfolio } from "./routes/portfolio";
 import { admin } from "./routes/admin";
+import { agent } from "./routes/agent";
 import { testControl } from "./routes/test-control";
 import { runCron } from "./cron";
 
@@ -29,6 +30,7 @@ app.route("/burn", burn);
 app.route("/referral", referral);
 app.route("/portfolio", portfolio);
 app.route("/admin", admin);
+app.route("/agent", agent);
 app.route("/__test", testControl);
 
 app.notFound((c) => c.json({ error: "not found" }, 404));

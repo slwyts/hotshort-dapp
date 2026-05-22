@@ -47,6 +47,9 @@ export const api = {
   get: <T>(path: string, jwt?: string) => request<T>(path, { method: "GET" }, jwt),
   post: <T>(path: string, body?: unknown, jwt?: string) =>
     request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }, jwt),
+  patch: <T>(path: string, body?: unknown, jwt?: string) =>
+    request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined }, jwt),
+  delete: <T>(path: string, jwt?: string) => request<T>(path, { method: "DELETE" }, jwt),
 };
 
 export const endpoints = {
@@ -87,8 +90,16 @@ export const endpoints = {
   adminGenesisScan: "/admin/genesis-scan",
   adminAirdrop: "/admin/airdrop-list",
   adminAgents: "/admin/agents",
+  adminAgentAccounts: "/admin/agent-accounts",
   adminStockPrice: "/admin/stock-price",
   adminStockPriceMode: "/admin/stock-price/mode",
   adminStockPriceSync: "/admin/stock-price/sync",
   adminAiConfig: "/admin/ai-config",
+  agentMe: "/agent/me",
+  agentSummary: "/agent/summary",
+  agentUsers: "/agent/users",
+  agentUserDetail: (address: string) => `/agent/users/${encodeURIComponent(address)}`,
+  agentUserTransactions: (address: string) => `/agent/users/${encodeURIComponent(address)}/transactions`,
+  agentAlerts: "/agent/alerts",
+  agentAlertAck: "/agent/alerts/ack",
 } as const;

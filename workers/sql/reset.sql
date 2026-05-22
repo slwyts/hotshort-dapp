@@ -1,4 +1,6 @@
 DROP TABLE IF EXISTS claim_signatures;
+DROP TABLE IF EXISTS agent_alert_acknowledgements;
+DROP TABLE IF EXISTS agent_accounts;
 DROP TABLE IF EXISTS airdrop_list;
 DROP TABLE IF EXISTS genesis_nodes;
 DROP TABLE IF EXISTS admin_config;

@@ -19,6 +19,60 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+ANVIL_PID=""
+WORKER_PID=""
+NEXT_PID=""
+
+cleanup() {
+  local code=$?
+  trap - EXIT INT TERM
+  for pid in "${NEXT_PID:-}" "${WORKER_PID:-}" "${ANVIL_PID:-}"; do
+    if [ -n "$pid" ]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+  exit "$code"
+}
+
+trap cleanup EXIT INT TERM
+
+append_no_proxy() {
+  local value="$1"
+  case ",${NO_PROXY:-}," in
+    *",$value,"*) ;;
+    *) NO_PROXY="${NO_PROXY:+$NO_PROXY,}$value" ;;
+  esac
+  case ",${no_proxy:-}," in
+    *",$value,"*) ;;
+    *) no_proxy="${no_proxy:+$no_proxy,}$value" ;;
+  esac
+}
+
+append_no_proxy "localhost"
+append_no_proxy "127.0.0.1"
+append_no_proxy "::1"
+export NO_PROXY no_proxy
+
+port_in_use() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn "sport = :$port" | awk 'NR > 1 { found = 1 } END { exit found ? 0 : 1 }'
+    return $?
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
+    return $?
+  fi
+  return 1
+}
+
+for port in 8545 8787 3000; do
+  if port_in_use "$port"; then
+    echo "❌ Port $port is already in use. Stop the previous dev server first, then run pnpm dev:full again." >&2
+    exit 1
+  fi
+done
+
 DEPLOYER_PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 SIGNER_PRIVATE_KEY="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 OWNER_ADDRESS="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
@@ -30,6 +84,7 @@ PANCAKE_ROUTER="0x10ED43C718714eb63d5aA57B78B54704E256024E"
 FORGE_BIN="${FORGE_BIN:-$HOME/.foundry/bin/forge}"
 CAST_BIN="${CAST_BIN:-$HOME/.foundry/bin/cast}"
 LOCAL_RPC_URL="http://127.0.0.1:8545"
+WRANGLER_CMD=(pnpm --dir "$ROOT/workers" exec wrangler)
 
 # 从 .env.local 读 BSC_FORK_RPC（付费 RPC，不入 git）
 if [ -f "$ROOT/.env.local" ]; then
@@ -54,6 +109,10 @@ anvil \
   --silent &
 ANVIL_PID=$!
 sleep 4
+if ! kill -0 "$ANVIL_PID" 2>/dev/null; then
+  echo "❌ Anvil exited before it became ready." >&2
+  exit 1
+fi
 
 echo "📦 Deploying HotshortVault to local chain..."
 DEPLOY_OUTPUT=$(PRIVATE_KEY=$DEPLOYER_PRIVATE_KEY \
@@ -159,14 +218,14 @@ export VAULT_ADDRESS
 echo "🔧 Running D1 migrations..."
 cd "$ROOT/workers"
 # 本地 D1 需要先创建（如果不存在）
-npx wrangler d1 execute hotshort --local --command "SELECT 1" 2>/dev/null || true
+"${WRANGLER_CMD[@]}" d1 execute hotshort --local --command "SELECT 1" 2>/dev/null || true
 # 清测试库后只跑数字迁移，避免 reset 被 wrangler migrations apply 当成正式迁移
-npx wrangler d1 execute hotshort --local --file sql/reset.sql 2>/dev/null || true
+"${WRANGLER_CMD[@]}" d1 execute hotshort --local --file sql/reset.sql 2>/dev/null || true
 # 跑迁移
 for f in migrations/[0-9][0-9][0-9][0-9]_*.sql; do
   [ -e "$f" ] || continue
   echo "  applying $f"
-  npx wrangler d1 execute hotshort --local --file "$f" 2>/dev/null || true
+  "${WRANGLER_CMD[@]}" d1 execute hotshort --local --file "$f" 2>/dev/null || true
 done
 
 echo "📈 Seeding WTO quote..."
@@ -174,9 +233,9 @@ WTO_QUOTE_CSV=$(curl -fsSL --max-time 8 'https://stooq.com/q/l/?s=wto.us&f=sd2t2
 WTO_PRICE=$(printf '%s\n' "$WTO_QUOTE_CSV" | awk -F, 'NR==2 {print $7}')
 if [[ "$WTO_PRICE" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
   NOW_TS=$(date +%s)
-  npx wrangler d1 execute hotshort --local --command \
+  "${WRANGLER_CMD[@]}" d1 execute hotshort --local --command \
     "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('stock_price_usdt', '$WTO_PRICE', 'dev-local', $NOW_TS)" 2>/dev/null || true
-  npx wrangler d1 execute hotshort --local --command \
+  "${WRANGLER_CMD[@]}" d1 execute hotshort --local --command \
     "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('stock_price_provider', 'Stooq', 'dev-local', $NOW_TS)" 2>/dev/null || true
   echo "✅ WTO quote seeded from Stooq: $WTO_PRICE USDT"
 else
@@ -184,17 +243,29 @@ else
 fi
 
 # 插入 owner 地址到 admin_config
-npx wrangler d1 execute hotshort --local --command \
+"${WRANGLER_CMD[@]}" d1 execute hotshort --local --command \
   "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('owner_addresses', '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266', 'script', strftime('%s','now'))" 2>/dev/null || true
 
 echo "🚀 Starting Worker..."
-npx wrangler dev --port 8787 &
+"${WRANGLER_CMD[@]}" dev --port 8787 &
 WORKER_PID=$!
 cd "$ROOT"
-sleep 3
+echo "⏳ Waiting for Worker /config..."
+for i in {1..30}; do
+  if curl -fsS --max-time 2 "http://127.0.0.1:8787/config" >/dev/null 2>&1; then
+    echo "✅ Worker /config ready"
+    break
+  fi
+  if [ "$i" -eq 30 ]; then
+    echo "❌ Worker /config is not reachable at http://127.0.0.1:8787/config" >&2
+    kill "$ANVIL_PID" "$WORKER_PID" 2>/dev/null || true
+    exit 1
+  fi
+  sleep 1
+done
 
 echo "🌐 Starting Next.js dev..."
-pnpm dev &
+env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY pnpm dev &
 NEXT_PID=$!
 sleep 5
 
@@ -218,6 +289,4 @@ echo ""
 echo "  按 Ctrl+C 停止所有服务"
 echo "============================================"
 
-# 等待任意子进程退出
-trap "kill $ANVIL_PID $WORKER_PID $NEXT_PID 2>/dev/null; exit" INT TERM
 wait

@@ -28,6 +28,26 @@ CREATE TABLE IF NOT EXISTS referral_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_referral_codes_user ON referral_codes(user);
 
+-- 代理商授权钱包（总后台授权，代理后台只读）
+CREATE TABLE IF NOT EXISTS agent_accounts (
+  address TEXT PRIMARY KEY,
+  label TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_accounts_enabled ON agent_accounts(enabled);
+
+-- 代理大额交易预警已读状态
+CREATE TABLE IF NOT EXISTS agent_alert_acknowledgements (
+  agent_address TEXT NOT NULL,
+  alert_id TEXT NOT NULL,
+  acknowledged_at INTEGER NOT NULL,
+  PRIMARY KEY (agent_address, alert_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_alert_ack_agent ON agent_alert_acknowledgements(agent_address, acknowledged_at);
+
 -- 质押订单
 CREATE TABLE IF NOT EXISTS stake_orders (
   id TEXT PRIMARY KEY,

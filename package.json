@@ -20,9 +20,9 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "dev:full": "bash scripts/dev-local.sh",
-    "worker:deploy": "cd workers && wrangler deploy",
-    "worker:db:migrate": "cd workers && wrangler d1 migrations apply hotshort --local",
-    "worker:db:migrate:prod": "cd workers && wrangler d1 migrations apply hotshort --remote"
+    "worker:deploy": "pnpm --dir workers exec wrangler deploy",
+    "worker:db:migrate": "pnpm --dir workers exec wrangler d1 migrations apply hotshort --local",
+    "worker:db:migrate:prod": "pnpm --dir workers exec wrangler d1 migrations apply hotshort --remote"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",

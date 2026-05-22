@@ -17,6 +17,7 @@ const TeamSection = dynamic(() => import("@/components/me/team-section").then((m
 const InviteSection = dynamic(() => import("@/components/me/invite-section").then((m) => m.InviteSection), { ssr: false });
 const DocsSection = dynamic(() => import("@/components/me/docs-section").then((m) => m.DocsSection), { ssr: false });
 const SettingsSection = dynamic(() => import("@/components/me/settings-section").then((m) => m.SettingsSection), { ssr: false });
+const AgentEntryCard = dynamic(() => import("@/components/me/agent-entry-card").then((m) => m.AgentEntryCard), { ssr: false });
 
 const TAB_KEYS = ["assets", "orders", "team", "invite", "docs", "settings"] as const;
 type TabKey = (typeof TAB_KEYS)[number];
@@ -82,6 +83,10 @@ function MeContent() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="mt-3">
+        <AgentEntryCard />
+      </div>
 
       {/* sub-tab — 5 个，横向滚动避免挤 */}
       <div className="my-3 -mx-1 overflow-x-auto">

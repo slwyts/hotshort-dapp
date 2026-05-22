@@ -1,6 +1,6 @@
 name = "hotshort-api"
 main = "src/index.ts"
-compatibility_date = "2025-05-01"
+compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 # 与前端共用 D1 数据库
