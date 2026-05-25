@@ -39,7 +39,7 @@ export default function AdminRatesPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const r = await api.get<{ rates: RateRow[] }>(endpoints.stakeOrders.replace("/orders", "/rates"));
+      const r = await api.get<{ rates: RateRow[] }>(endpoints.stakeRates);
       const map: Record<string, number> = {};
       for (const a of STAKE_ASSETS) {
         for (const m of STAKE_LOCK_MONTHS) {

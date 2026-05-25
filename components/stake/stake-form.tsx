@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAccount, useWriteContract } from "wagmi";
 import { parseUnits, keccak256, toHex } from "viem";
 import { Loader2, Layers, ArrowRight } from "lucide-react";
@@ -14,6 +14,7 @@ import { useEnsureAllowance } from "@/lib/hooks/use-ensure-allowance";
 import { VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
 import { useContracts } from "@/lib/runtime-config";
+import { api, endpoints } from "@/lib/api";
 import {
   STAKE_ASSETS,
   STAKE_LOCK_MONTHS,
@@ -34,6 +35,22 @@ interface StakeFormProps {
   }) => void;
 }
 
+interface RateRow {
+  asset: string;
+  lock_months: number;
+  monthly_rate_bps: number;
+}
+
+function createDefaultRates() {
+  const map: Record<string, number> = {};
+  for (const stakeAsset of STAKE_ASSETS) {
+    for (const months of STAKE_LOCK_MONTHS) {
+      map[`${stakeAsset}:${months}`] = STAKE_DEFAULT_RATES_BPS[stakeAsset][months];
+    }
+  }
+  return map;
+}
+
 export function StakeForm({ onDeposited }: StakeFormProps) {
   const { address, isConnected } = useAccount();
   const { t } = useLocale();
@@ -51,9 +68,29 @@ export function StakeForm({ onDeposited }: StakeFormProps) {
   const [asset, setAsset] = useState<StakeAsset>("USDT");
   const [lockMonths, setLockMonths] = useState<StakeLockMonths>(3);
   const [amount, setAmount] = useState("100");
+  const [rates, setRates] = useState<Record<string, number>>(() => createDefaultRates());
   const [submitting, setSubmitting] = useState(false);
 
-  const monthlyBps = STAKE_DEFAULT_RATES_BPS[asset][lockMonths];
+  useEffect(() => {
+    let cancelled = false;
+    api.get<{ rates: RateRow[] }>(endpoints.stakeRates)
+      .then((res) => {
+        if (cancelled) return;
+        const next = createDefaultRates();
+        for (const row of res.rates ?? []) {
+          if (!STAKE_ASSETS.includes(row.asset as StakeAsset)) continue;
+          if (!STAKE_LOCK_MONTHS.includes(row.lock_months as StakeLockMonths)) continue;
+          next[`${row.asset}:${row.lock_months}`] = row.monthly_rate_bps;
+        }
+        setRates(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const monthlyBps = rates[`${asset}:${lockMonths}`] ?? STAKE_DEFAULT_RATES_BPS[asset][lockMonths];
   const totalReturnBps = monthlyBps * lockMonths;
 
   const submit = async () => {
