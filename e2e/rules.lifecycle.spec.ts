@@ -23,7 +23,6 @@ import {
   runTestCron,
   setTestConfig,
   setTestLotteryWinning,
-  setTokenBalance,
   signIn,
   type VaultClaim,
 } from "./helpers";
@@ -85,7 +84,10 @@ type LotteryRoundResponse = {
 
 type BurnMeResponse = {
   totalBurnedHs: string;
+  totalBurnedUsdt: string;
   personalClaimedHs: string;
+  personalClaimableHs: string;
+  personalClaimed: boolean;
   out: boolean;
   top10PendingHs: string;
   eligibleAirdrop: boolean;
@@ -509,7 +511,7 @@ test.describe("README rule lifecycle scripts", () => {
       lockMonths: 6,
     });
 
-    await recordBurn({ account: ALICE, jwt: aliceJwt, amount: parseEther("6000") });
+    await recordBurn({ account: ALICE, jwt: aliceJwt, amount: parseEther("1500000") });
     await recordBurn({ account: BOB, jwt: bobJwt, amount: parseEther("2000"), referrer: ALICE.address as Address });
     await recordBurn({ account: CHARLIE, jwt: charlieJwt, amount: parseEther("1000"), referrer: BOB.address as Address });
 
@@ -521,11 +523,15 @@ test.describe("README rule lifecycle scripts", () => {
     ]);
 
     const settlement = await runTestCron<{ round: number; total: string; top10: number }>("burn-weekly");
-    expect(settlement.result).toMatchObject({ round: burnRound, total: parseEther("9000").toString(), top10: 3 });
+    expect(settlement.result).toMatchObject({ round: burnRound, total: parseEther("1503000").toString(), top10: 3 });
 
     const aliceBurnStatus = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
     expect(aliceBurnStatus.eligibleAirdrop).toBe(true);
+    expect(BigInt(aliceBurnStatus.totalBurnedUsdt)).toBeGreaterThanOrEqual(parseEther("1000"));
     expect(BigInt(aliceBurnStatus.top10PendingHs)).toBeGreaterThan(0n);
+    expect(aliceBurnStatus.personalClaimed).toBe(false);
+    expect(aliceBurnStatus.out).toBe(false);
+    expect(BigInt(aliceBurnStatus.personalClaimableHs)).toBe(parseEther("3000000"));
 
     const aliceStockRewardClaim = await apiRequest<{
       token: string;
@@ -552,6 +558,27 @@ test.describe("README rule lifecycle scripts", () => {
     await claimFromVault(ALICE, aliceBurnClaim);
     await expectNonceConsumed(aliceBurnClaim);
 
+    const aliceAfterWeeklyClaim = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
+    expect(aliceAfterWeeklyClaim.personalClaimed).toBe(false);
+    expect(aliceAfterWeeklyClaim.out).toBe(false);
+    expect(BigInt(aliceAfterWeeklyClaim.personalClaimableHs)).toBe(parseEther("3000000"));
+
+    const alicePersonalClaim = await apiRequest<VaultClaim & { amount: string; personalClaimedHs: string }>("/burn/claim/personal", {
+      method: "POST",
+      headers: bearer(aliceJwt),
+    });
+    expect(alicePersonalClaim.reason).toBe(8);
+    expect(BigInt(alicePersonalClaim.amount)).toBe(parseEther("3000000"));
+    expect(BigInt(alicePersonalClaim.personalClaimedHs)).toBe(parseEther("3000000"));
+    await claimFromVault(ALICE, alicePersonalClaim);
+    await expectNonceConsumed(alicePersonalClaim);
+
+    const aliceAfterPersonalClaim = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
+    expect(aliceAfterPersonalClaim.personalClaimed).toBe(true);
+    expect(aliceAfterPersonalClaim.out).toBe(true);
+    expect(BigInt(aliceAfterPersonalClaim.personalClaimableHs)).toBe(0n);
+    expect(BigInt(aliceAfterPersonalClaim.personalClaimedHs)).toBe(parseEther("3000000"));
+
     const charlieBurnClaim = await apiRequest<BurnClaimResponse>("/burn/claim/top10", {
       method: "POST",
       headers: bearer(charlieJwt),
@@ -559,12 +586,6 @@ test.describe("README rule lifecycle scripts", () => {
     expect(charlieBurnClaim.rewardRows).toBeGreaterThan(0);
     await claimFromVault(CHARLIE, charlieBurnClaim);
     await expectNonceConsumed(charlieBurnClaim);
-
-    const doubleOutBurn = BigInt(aliceBurnClaim.amount) * 2n;
-    await setTokenBalance(HS_TOKEN as Address, ALICE.address as Address, doubleOutBurn + parseEther("1000"), 0n);
-    await recordBurn({ account: ALICE, jwt: aliceJwt, amount: doubleOutBurn });
-    const aliceAfterDoubleOut = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
-    expect(aliceAfterDoubleOut.out).toBe(true);
 
     const airdropSubmission = await apiRequest<{ id: string; created: boolean }>("/burn/airdrop/submit", {
       method: "POST",

@@ -51,6 +51,11 @@ async function getUserHighestTier(env: Env, user: string): Promise<AiTierKey | n
   return best;
 }
 
+async function hasDirectReferralQualification(env: Env, user: string): Promise<boolean> {
+  const tier = await getUserHighestTier(env, user);
+  return tier !== null && TIER_PRIORITY[tier] > TIER_PRIORITY.pioneer;
+}
+
 /**
  * 套餐购买的直推一次性返佣（USDT 计价，USDT 领取）。
  * §2.4(1) 直推无等级压制，下级高于上级也全额拿。
@@ -69,6 +74,7 @@ export async function recordDirectReferral(env: Env, params: {
   const path = await getPath(env, buyer);
   const upper = path.level1;
   if (!upper) return;
+  if (!await hasDirectReferralQualification(env, upper)) return;
 
   const reward = (usdtIn * BigInt(bps)) / BigInt(BPS_DENOMINATOR);
   if (reward <= 0n) return;

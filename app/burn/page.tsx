@@ -19,13 +19,17 @@ import { useContracts } from "@/lib/runtime-config";
 import {
   BURN_ALLOCATION_BPS,
   BURN_AIRDROP_MIN_USDT,
+  BURN_PROMOTION_ACTIVATE_USDT,
   bpsToPercent,
 } from "@/lib/constants/business-rules";
 import { formatNumber, shortenAddress, cn } from "@/lib/utils";
 
 interface BurnMe {
   totalBurnedHs: string;
+  totalBurnedUsdt: string;
   personalClaimedHs: string;
+  personalClaimableHs: string;
+  personalClaimed: boolean;
   out: boolean;
   top10PendingHs: string;
   eligibleAirdrop: boolean;
@@ -202,6 +206,54 @@ export default function BurnPage() {
     }
   };
 
+  const claimPersonal = async () => {
+    const token = jwt ?? (await signIn());
+    if (!token) return;
+    try {
+      Swal.fire({ title: t("burn.personalClaim.preparing"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
+      const sig = await api.post<{
+        token?: string;
+        recipients?: string[];
+        amounts?: string[];
+        amount: string;
+        nonce?: string;
+        deadline?: number;
+        reason?: number;
+        signature?: string;
+      }>(endpoints.burnClaimPersonal, {}, token);
+      if (!sig.signature || !sig.token) {
+        await Swal.fire({ icon: "info", title: t("burn.claim.noClaim.title"), text: t("burn.personalClaim.noClaim"), background: "#141419", color: "#fff" });
+        return;
+      }
+      Swal.fire({ title: t("burn.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
+      await writeContractAsync({
+        address: vault,
+        abi: VAULT_ABI,
+        functionName: "claim",
+        args: [
+          sig.token as `0x${string}`,
+          sig.recipients as `0x${string}`[],
+          sig.amounts!.map((amount) => BigInt(amount)),
+          BigInt(sig.nonce!),
+          BigInt(sig.deadline!),
+          sig.reason!,
+          sig.signature as `0x${string}`,
+        ],
+      });
+      await Swal.fire({
+        icon: "success",
+        title: t("burn.personalClaim.success.title"),
+        html: t("burn.personalClaim.success.body", { amount: formatNumber(Number(formatUnits(BigInt(sig.amount), 18)), 2) }),
+        background: "#141419",
+        color: "#fff",
+        confirmButtonColor: "#b829ff",
+      });
+      await refresh();
+    } catch (e) {
+      await Swal.fire({ icon: "error", title: t("error.title"), text: (e as Error).message, background: "#141419", color: "#fff" });
+    }
+  };
+
   const submitAirdrop = async () => {
     if (!hotshortAccount.trim()) return;
     const token = jwt ?? (await signIn());
@@ -226,7 +278,10 @@ export default function BurnPage() {
   };
 
   const totalBurn = me ? Number(formatUnits(BigInt(me.totalBurnedHs), 18)) : 0;
+  const totalBurnUsdt = me ? Number(formatUnits(BigInt(me.totalBurnedUsdt), 18)) : 0;
   const top10Pending = me ? Number(formatUnits(BigInt(me.top10PendingHs), 18)) : 0;
+  const personalClaimable = me ? Number(formatUnits(BigInt(me.personalClaimableHs), 18)) : 0;
+  const personalClaimed = me ? Number(formatUnits(BigInt(me.personalClaimedHs), 18)) : 0;
   const currentWeeklyBurn = round ? Number(formatUnits(BigInt(round.current.totalBurnHs), 18)) : 0;
   const currentTop10Pool = round ? Number(formatUnits(BigInt(round.current.top10PoolHs), 18)) : 0;
 
@@ -266,13 +321,27 @@ export default function BurnPage() {
           </Button>
 
           {me && (
-            <div className="grid grid-cols-3 gap-1.5 text-center">
+            <div className="grid grid-cols-2 gap-1.5 text-center">
               <Stat label={t("burn.stat.total")} value={formatNumber(totalBurn, 0)} unit="HS" />
-              <Stat label={t("burn.stat.claimable")} value={formatNumber(top10Pending, 2)} unit="HS" accent />
-              <Stat label={t("burn.stat.status")} value={me.out ? t("burn.status.done") : t("burn.status.active")} unit="" subtle />
+              <Stat label={t("burn.stat.personalClaimable")} value={formatNumber(personalClaimable, 2)} unit="HS" accent />
+              <Stat label={t("burn.stat.weeklyClaimable")} value={formatNumber(top10Pending, 2)} unit="HS" />
+              <Stat label={t("burn.stat.status")} value={me.out ? t("burn.status.weightOnly") : t("burn.status.active")} unit="" subtle />
             </div>
           )}
 
+          {me && (
+            <div className="rounded-md border border-[#ef4444]/20 bg-[#ef4444]/5 px-3 py-2 text-[11px] leading-relaxed text-red-100/75">
+              {me.out || me.personalClaimed
+                ? t("burn.personalHint.done", { amount: formatNumber(personalClaimed, 2) })
+                : t("burn.personalHint.active")}
+            </div>
+          )}
+
+          {me && personalClaimable > 0 && !me.out && !me.personalClaimed && (
+            <Button onClick={claimPersonal} variant="outline" className="w-full border-[#ef4444]/40 text-red-100 hover:bg-[#ef4444]/10">
+              <Flame className="h-4 w-4" /> {t("burn.claimPersonal")}
+            </Button>
+          )}
           {me && top10Pending > 0 && (
             <Button onClick={claimTop10} variant="outline" className="w-full">
               <Award className="h-4 w-4" /> {t("burn.claimWeekly")}
@@ -288,8 +357,11 @@ export default function BurnPage() {
         </CardHeader>
         <CardContent>
           <div className="mb-3 grid grid-cols-2 gap-2">
-            <Stat label="本周总奖池" value={formatNumber(currentWeeklyBurn, 0)} unit="HS" accent />
-            <Stat label="Top10 周池" value={formatNumber(currentTop10Pool, 2)} unit="HS" />
+            <Stat label={t("burn.pendingBurnTotal")} value={formatNumber(currentWeeklyBurn, 0)} unit="HS" accent />
+            <Stat label={t("burn.top10Pool")} value={formatNumber(currentTop10Pool, 2)} unit="HS" />
+          </div>
+          <div className="mb-3 rounded-md border border-[#00c6ff]/20 bg-[#00c6ff]/5 px-3 py-2 text-[11px] leading-relaxed text-[#8fe7ff]">
+            {t("burn.poolHint", { activate: BURN_PROMOTION_ACTIVATE_USDT })}
           </div>
           <div className="grid grid-cols-3 gap-1.5 text-sm">
             {ALLOC_TABLE.map((a) => (
@@ -356,7 +428,7 @@ export default function BurnPage() {
           <CardHeader>
             <CardTitle>{t("burn.airdropTitle")}</CardTitle>
             <CardDescription>
-              {t("burn.airdropDesc", { min: BURN_AIRDROP_MIN_USDT, hs: formatNumber(totalBurn, 0) })}
+              {t("burn.airdropDesc", { min: BURN_AIRDROP_MIN_USDT, usdt: formatNumber(totalBurnUsdt, 2) })}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">

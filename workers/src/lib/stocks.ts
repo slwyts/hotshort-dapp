@@ -14,6 +14,10 @@ export interface Holdings {
   locked: bigint;
 }
 
+export interface SellableHoldings extends Holdings {
+  available: bigint;
+}
+
 export interface StockQuote {
   symbol: string;
   name: string;
@@ -49,6 +53,12 @@ export async function getHoldings(env: Env, user: string): Promise<Holdings> {
   return { total: BigInt(row.total_stock), locked: BigInt(row.locked_stock) };
 }
 
+export async function getSellableHoldings(env: Env, user: string): Promise<SellableHoldings> {
+  const holdings = await getHoldings(env, user);
+  const available = holdings.total > holdings.locked ? holdings.total - holdings.locked : 0n;
+  return { ...holdings, available };
+}
+
 /** 增加用户股票余额（购买赠送 / 分红 / 闪兑） */
 export async function addStock(env: Env, user: string, amount: bigint, locked = false): Promise<void> {
   if (amount <= 0n) return;
@@ -76,6 +86,25 @@ export async function decLockedStock(env: Env, user: string, amount: bigint): Pr
   )
     .bind(newLocked.toString(), now, u)
     .run();
+}
+
+export async function sellAvailableStock(env: Env, user: string, amount: bigint): Promise<SellableHoldings> {
+  if (amount <= 0n) throw new Error("bad stock amount");
+  const u = user.toLowerCase();
+  const holdings = await getSellableHoldings(env, u);
+  if (holdings.available < amount) throw new Error("insufficient available stock");
+  const now = await nowSeconds(env);
+  const newTotal = holdings.total - amount;
+  await env.DB.prepare(
+    "UPDATE stock_holdings SET total_stock = ?, updated_at = ? WHERE user = ?",
+  )
+    .bind(newTotal.toString(), now, u)
+    .run();
+  return {
+    total: newTotal,
+    locked: holdings.locked,
+    available: newTotal > holdings.locked ? newTotal - holdings.locked : 0n,
+  };
 }
 
 export async function getManualStockPriceUsdt(env: Env): Promise<{ price: number; updatedAt: number | null }> {

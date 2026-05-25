@@ -9,6 +9,7 @@ const tabs = [
   { href: "/ai", labelKey: "ai.subnav.plans" },
   { href: "/ai/dividend", labelKey: "ai.subnav.dividend" },
   { href: "/ai/swap", labelKey: "ai.subnav.swap" },
+  { href: "/ai/sell", labelKey: "ai.subnav.sell" },
 ];
 
 export function AiSubnav() {

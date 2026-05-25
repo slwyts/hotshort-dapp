@@ -46,10 +46,16 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
   for (const log of claimed) {
     const nonce = log.args.nonce?.toString();
     if (!nonce) continue;
+    const usedAt = Math.floor(Date.now() / 1000);
     await env.DB.prepare(
       "UPDATE claim_signatures SET used_at = ? WHERE nonce = ? AND used_at IS NULL",
     )
-      .bind(Math.floor(Date.now() / 1000), nonce)
+      .bind(usedAt, nonce)
+      .run();
+    await env.DB.prepare(
+      "UPDATE stock_sales SET claimed_at = ?, claim_tx_hash = ? WHERE claim_nonce = ? AND claimed_at IS NULL",
+    )
+      .bind(usedAt, log.transactionHash, nonce)
       .run();
   }
 

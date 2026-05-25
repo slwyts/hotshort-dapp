@@ -23,6 +23,7 @@ const RESET_TABLES = [
   "agent_alert_acknowledgements",
   "agent_accounts",
   "referral_rewards",
+  "stock_sales",
   "stock_swaps",
   "stock_holdings",
   "ai_stock_releases",

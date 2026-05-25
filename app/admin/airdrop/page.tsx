@@ -68,7 +68,7 @@ export default function AdminAirdropPage() {
           <Flame className="h-6 w-6 text-[#00c6ff]" /> 版权空投
         </h1>
         <p className="mt-1 text-sm text-white/50">
-          燃烧满 1000U 的用户提交 Hotshort 账户后，在此确认发放
+          累计燃烧 HS 的 U 价值满 1000U 后，用户提交 Hotshort 账户并在此确认发放
         </p>
 
         <Card className="mt-8">
@@ -88,7 +88,7 @@ export default function AdminAirdropPage() {
                       <th className="px-3 py-3">提交时间</th>
                       <th className="px-3 py-3">钱包地址</th>
                       <th className="px-3 py-3">Hotshort 账户</th>
-                      <th className="px-3 py-3 text-right">累计燃烧 (HS)</th>
+                      <th className="px-3 py-3 text-right">累计燃烧原始量 (HS)</th>
                       <th className="px-3 py-3">状态</th>
                       <th className="px-3 py-3 text-right">操作</th>
                     </tr>

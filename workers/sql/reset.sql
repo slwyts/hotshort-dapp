@@ -15,6 +15,7 @@ DROP TABLE IF EXISTS lottery_rounds;
 DROP TABLE IF EXISTS referral_rewards;
 DROP TABLE IF EXISTS ai_dividend_user_daily;
 DROP TABLE IF EXISTS ai_dividend_pool_daily;
+DROP TABLE IF EXISTS stock_sales;
 DROP TABLE IF EXISTS stock_swaps;
 DROP TABLE IF EXISTS stock_swap_locks;
 DROP TABLE IF EXISTS stock_holdings;

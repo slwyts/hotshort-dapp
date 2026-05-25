@@ -69,6 +69,12 @@ async function hasMinHsHolding(env: Env, user: string, minUsdt: bigint): Promise
   return await hsWeiToUsdtWei(env, hs) >= minUsdt;
 }
 
+async function outUsers(env: Env): Promise<Set<string>> {
+  const rows = await env.DB.prepare("SELECT user FROM burn_personal_status WHERE out_at IS NOT NULL")
+    .all<{ user: string }>();
+  return new Set((rows.results ?? []).map((row) => row.user.toLowerCase()));
+}
+
 /**
  * §4.4 燃烧周榜结算（每周日 UTC 16:00 = 北京时间周一 00:00）
  *
@@ -98,6 +104,7 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
     totalBurn += amount;
     userBurns.set(row.user, (userBurns.get(row.user) ?? 0n) + amount);
   }
+  const out = await outUsers(env);
 
   // 上周 Top10 滚入
   const lastCarryRow = await env.DB.prepare("SELECT top10_carryover_hs FROM burn_rounds WHERE round = ?").bind(round - 1).first<{ top10_carryover_hs: string }>();
@@ -133,6 +140,7 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
 
   // Top 10：按当周 burn_records 用户聚合
   const top10 = [...userBurns.entries()]
+    .filter(([user]) => !out.has(user.toLowerCase()))
     .map(([user, burn]) => ({ user, burn }))
     .sort((a, b) => (a.burn === b.burn ? a.user.localeCompare(b.user) : a.burn > b.burn ? -1 : 1))
     .slice(0, 10);
@@ -177,8 +185,8 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
     const amount = BigInt(row.hs_amount);
     const gen1 = row.referrer?.toLowerCase() || official;
     const gen2 = gen1 === official ? official : await directUpperOf(env, gen1) ?? official;
-    const gen1Active = gen1 === official || await isBurnPromotionActive(env, gen1, minPromotionBurn);
-    const gen2Active = gen2 === official || await isBurnPromotionActive(env, gen2, minPromotionBurn);
+    const gen1Active = gen1 === official || (!out.has(gen1) && await isBurnPromotionActive(env, gen1, minPromotionBurn));
+    const gen2Active = gen2 === official || (!out.has(gen2) && await isBurnPromotionActive(env, gen2, minPromotionBurn));
     await insertReferralReward(env, {
       user: gen1Active ? gen1 : official,
       sourceUser: row.user,
@@ -210,6 +218,7 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
   const eligibleStakes: { id: string; user: string; value: bigint }[] = [];
   let totalStakeValue = 0n;
   for (const row of stakeRows.results ?? []) {
+    if (out.has(row.user.toLowerCase())) continue;
     if (!await hasMinHsHolding(env, row.user, minStakeHsValue)) continue;
     const value = await stakeAssetWeiToUsdtWei(env, row.asset, BigInt(row.amount));
     if (value <= 0n) continue;
@@ -231,10 +240,11 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
   // 5% AI 股票分红：按链下股票总持仓占比，把 HS 池折成 STOCK 奖励。
   const stockRows = await env.DB.prepare("SELECT user, total_stock FROM stock_holdings").all<{ user: string; total_stock: string }>();
   let totalStock = 0n;
-  for (const row of stockRows.results ?? []) totalStock += BigInt(row.total_stock);
+  const eligibleStockRows = (stockRows.results ?? []).filter((row) => !out.has(row.user.toLowerCase()));
+  for (const row of eligibleStockRows) totalStock += BigInt(row.total_stock);
   const aiPoolUsdt = await hsWeiToUsdtWei(env, aiPool);
   const aiPoolStock = await usdtWeiToStockWei(env, aiPoolUsdt);
-  for (const row of stockRows.results ?? []) {
+  for (const row of eligibleStockRows) {
     const stock = BigInt(row.total_stock);
     await addRewardClaim(env, {
       user: row.user,

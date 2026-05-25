@@ -125,6 +125,22 @@ CREATE TABLE IF NOT EXISTS stock_swaps (
 CREATE INDEX IF NOT EXISTS idx_stock_swaps_user ON stock_swaps(user, swapped_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_swaps_source_tx ON stock_swaps(source_tx_hash);
 
+-- 股票 -> HS 卖出流水（仅可卖可用股票，锁仓股票不可卖）
+CREATE TABLE IF NOT EXISTS stock_sales (
+  id TEXT PRIMARY KEY,
+  user TEXT NOT NULL,
+  stock_in TEXT NOT NULL,
+  hs_out TEXT NOT NULL,
+  stock_price_usdt TEXT NOT NULL,
+  hs_price_usdt TEXT NOT NULL,
+  sold_at INTEGER NOT NULL,
+  claim_nonce TEXT,
+  claim_tx_hash TEXT,
+  claimed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_stock_sales_user ON stock_sales(user, sold_at);
+CREATE INDEX IF NOT EXISTS idx_stock_sales_claim_nonce ON stock_sales(claim_nonce);
+
 -- 每日股票分红池快照
 CREATE TABLE IF NOT EXISTS ai_dividend_pool_daily (
   date TEXT PRIMARY KEY,

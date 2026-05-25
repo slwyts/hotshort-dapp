@@ -6,9 +6,11 @@ import { upsertUser, requireBoundUser } from "../lib/users";
 import {
   addStock,
   getHoldings,
+  getSellableHoldings,
   getStockQuote,
   getStockPriceUsdt,
   getHsPriceUsdt,
+  sellAvailableStock,
   usdtToStockWei,
   bigintWei,
 } from "../lib/stocks";
@@ -18,7 +20,7 @@ import { nowSeconds, todayBeijing } from "../lib/time";
 import { createClaimSignature } from "../lib/claims";
 import { addRewardClaim, markRewardRowsClaimed, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
 import { createAiStockReleaseSchedule } from "../lib/ai-releases";
-import { hsWeiToUsdtWei, stockWeiToUsdtWei, usdtWeiToHsWei } from "../lib/pricing";
+import { decimalToWei, hsWeiToUsdtWei, stockWeiToUsdtWei, usdtWeiToHsWei } from "../lib/pricing";
 import { readTokenBalance } from "../lib/token-balance";
 import { verifyVaultDeposit } from "../lib/vault-events";
 import {
@@ -33,13 +35,31 @@ import {
 export const ai = new Hono<{ Bindings: Env }>();
 
 const TIER_MAP = new Map(AI_TIERS.map((t) => [t.key as AiTierKey, t]));
+const WEI_SCALE = 10n ** 18n;
+
+function parsePositiveWei(value: unknown): bigint | null {
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
+  const amount = BigInt(value);
+  return amount > 0n ? amount : null;
+}
+
+function quoteStockSale(stockWei: bigint, stockPriceUsdt: number, hsPriceUsdt: number) {
+  const stockPriceWei = decimalToWei(stockPriceUsdt);
+  const hsPriceWei = decimalToWei(hsPriceUsdt);
+  if (stockWei <= 0n || stockPriceWei <= 0n || hsPriceWei <= 0n) {
+    return { usdtOut: 0n, hsOut: 0n };
+  }
+  const usdtOut = (stockWei * stockPriceWei) / WEI_SCALE;
+  const hsOut = (usdtOut * WEI_SCALE) / hsPriceWei;
+  return { usdtOut, hsOut };
+}
 
 /** GET /ai/holdings  当前用户股票持仓（含锁仓） */
 ai.get("/holdings", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
-  const h = await getHoldings(c.env, user);
-  return c.json({ totalStock: h.total.toString(), lockedStock: h.locked.toString() });
+  const h = await getSellableHoldings(c.env, user);
+  return c.json({ totalStock: h.total.toString(), lockedStock: h.locked.toString(), availableStock: h.available.toString() });
 });
 
 /** GET /ai/orders  当前用户购买的所有套餐 */
@@ -215,6 +235,89 @@ ai.post("/swap", async (c) => {
   await addStock(c.env, user, stockOut, false);
 
   return c.json({ id, stockOut: stockOut.toString(), stockLocked: "0", unlocksAt: null });
+});
+
+/** GET /ai/sell/quote  查询可卖 WTO 与按当前行情估算的 HS 到账。 */
+ai.get("/sell/quote", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+
+  const amountParam = c.req.query("stockAmountWei");
+  const stockAmount = amountParam ? parsePositiveWei(amountParam) : 0n;
+  if (amountParam && stockAmount === null) return c.json({ error: "bad stockAmountWei" }, 400);
+
+  const [holdings, stockPriceUsdt, hsPriceUsdt] = await Promise.all([
+    getSellableHoldings(c.env, user),
+    getStockPriceUsdt(c.env),
+    getHsPriceUsdt(c.env),
+  ]);
+  const { usdtOut, hsOut } = quoteStockSale(stockAmount ?? 0n, stockPriceUsdt, hsPriceUsdt);
+
+  return c.json({
+    holdings: {
+      totalStock: holdings.total.toString(),
+      lockedStock: holdings.locked.toString(),
+      availableStock: holdings.available.toString(),
+    },
+    stockAmount: (stockAmount ?? 0n).toString(),
+    stockPriceUsdt,
+    hsPriceUsdt,
+    usdtOut: usdtOut.toString(),
+    hsOut: hsOut.toString(),
+    enough: (stockAmount ?? 0n) <= holdings.available,
+  });
+});
+
+/** POST /ai/sell  卖出可用 WTO，按成交时行情签发 HS 领取。 */
+ai.post("/sell", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  const body = (await c.req.json().catch(() => ({}))) as { stockAmountWei?: string };
+  const stockAmount = parsePositiveWei(body.stockAmountWei);
+  if (stockAmount === null) return c.json({ error: "bad stockAmountWei" }, 400);
+
+  const holdings = await getSellableHoldings(c.env, user);
+  if (stockAmount > holdings.available) return c.json({ error: "insufficient available stock" }, 400);
+
+  const [stockPriceUsdt, hsPriceUsdt] = await Promise.all([
+    getStockPriceUsdt(c.env),
+    getHsPriceUsdt(c.env),
+  ]);
+  const { usdtOut, hsOut } = quoteStockSale(stockAmount, stockPriceUsdt, hsPriceUsdt);
+  if (hsOut <= 0n) return c.json({ error: "quote unavailable" }, 503);
+
+  const remaining = await sellAvailableStock(c.env, user, stockAmount);
+  const claim = await createClaimSignature(c.env, {
+    user: user as Address,
+    token: c.env.HS_TOKEN.toLowerCase() as Address,
+    payouts: [{ recipient: user as Address, amount: hsOut }],
+    reason: 7,
+  });
+
+  const id = ulid();
+  const now = await nowSeconds(c.env);
+  await c.env.DB.prepare(
+    `INSERT INTO stock_sales
+       (id, user, stock_in, hs_out, stock_price_usdt, hs_price_usdt, sold_at, claim_nonce)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(id, user, stockAmount.toString(), hsOut.toString(), String(stockPriceUsdt), String(hsPriceUsdt), now, claim.nonce)
+    .run();
+
+  return c.json({
+    id,
+    stockIn: stockAmount.toString(),
+    usdtOut: usdtOut.toString(),
+    hsOut: hsOut.toString(),
+    stockPriceUsdt,
+    hsPriceUsdt,
+    holdings: {
+      totalStock: remaining.total.toString(),
+      lockedStock: remaining.locked.toString(),
+      availableStock: remaining.available.toString(),
+    },
+    ...claim,
+  });
 });
 
 /**

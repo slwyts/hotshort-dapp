@@ -19,7 +19,7 @@ const sections = [
   { href: "/admin/ai-config", icon: BarChart3, title: "AI 量化", desc: "每日交易模拟与分红池配置" },
   { href: "/admin/agents", icon: Users, title: "代理商", desc: "团队数据与返佣统计" },
   { href: "/admin/lottery", icon: Ticket, title: "彩票管理", desc: "门票定价与开奖" },
-  { href: "/admin/airdrop", icon: Flame, title: "版权空投", desc: "燃烧满 1000U 用户的空投发放管理" },
+  { href: "/admin/airdrop", icon: Flame, title: "版权空投", desc: "燃烧 HS 价值满 1000U 用户的空投发放管理" },
   { href: "/admin/funds", icon: Wallet, title: "资金与安全", desc: "Vault 余额、暂停、提取" },
 ];
 

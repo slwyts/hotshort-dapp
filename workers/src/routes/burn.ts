@@ -8,10 +8,10 @@ import { nowSeconds } from "../lib/time";
 import { createClaimSignature } from "../lib/claims";
 import { markRewardRowsClaimed, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
 import { verifyVaultBurn } from "../lib/vault-events";
+import { hsWeiToUsdtWei } from "../lib/pricing";
 import {
   BURN_ALLOCATION_BPS,
   BURN_AIRDROP_MIN_USDT,
-  BURN_PERSONAL_DOUBLE_OUT_BPS,
   BPS_DENOMINATOR,
 } from "@/lib/constants/business-rules";
 
@@ -43,12 +43,29 @@ async function ensurePersonalRow(env: Env, user: string): Promise<{ total: bigin
   };
 }
 
+async function isBurnAirdropEligible(env: Env, burnedHs: bigint): Promise<boolean> {
+  const burnedUsdt = await hsWeiToUsdtWei(env, burnedHs);
+  return burnedUsdt >= BigInt(BURN_AIRDROP_MIN_USDT) * 10n ** 18n;
+}
+
+async function hasClaimedPersonalBurn(env: Env, user: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    "SELECT id FROM burn_records WHERE user = ? AND claimed_individual = 1 LIMIT 1",
+  )
+    .bind(user.toLowerCase())
+    .first<{ id: string }>();
+  return !!row;
+}
+
 /** GET /burn/me  个人状态 + 当周可领总额 */
 burn.get("/me", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
 
   const status = await ensurePersonalRow(c.env, user);
+  const personalClaimed = await hasClaimedPersonalBurn(c.env, user);
+  const personalClaimable = status.total > 0n && !status.out && !personalClaimed ? status.total * 2n : 0n;
+  const totalBurnedUsdt = await hsWeiToUsdtWei(c.env, status.total);
 
   // 我作为 Top10 的未领奖
   const pendingRows = await c.env.DB.prepare(
@@ -80,7 +97,7 @@ burn.get("/me", async (c) => {
   }
 
   const referralRows = await c.env.DB.prepare(
-    "SELECT reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0 AND reward_token = 'HS'",
+    "SELECT reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0 AND reward_token = 'HS' AND kind IN ('burn-gen1', 'burn-gen2')",
   )
     .bind(user)
     .all<{ reward_amount: string }>();
@@ -93,7 +110,10 @@ burn.get("/me", async (c) => {
 
   return c.json({
     totalBurnedHs: status.total.toString(),
+    totalBurnedUsdt: totalBurnedUsdt.toString(),
     personalClaimedHs: status.claimed.toString(),
+    personalClaimableHs: personalClaimable.toString(),
+    personalClaimed,
     out: !!status.out,
     top10PendingHs: top10Pending.toString(),
     pendingBreakdown: {
@@ -103,7 +123,7 @@ burn.get("/me", async (c) => {
       stakeHs: stakeReward.toString(),
       aiHs: aiReward.toString(),
     },
-    eligibleAirdrop: status.total >= BigInt(Math.floor(BURN_AIRDROP_MIN_USDT * 1e18)),
+    eligibleAirdrop: totalBurnedUsdt >= BigInt(BURN_AIRDROP_MIN_USDT) * 10n ** 18n,
   });
 });
 
@@ -215,22 +235,16 @@ burn.post("/record", async (c) => {
     .bind(id, user, amount.toString(), referrer, now, body.sourceTxHash)
     .run();
 
-  // 累计 + 出局判断
+  // 累计燃烧额；个人燃烧权益领取会单独触发出局。
   const status = await ensurePersonalRow(c.env, user);
   const total = status.total + amount;
-  let outAt = status.out;
-  if (!outAt && status.claimed > 0n) {
-    // 双倍出局：累计燃烧 ≥ 已领取 × 2
-    const cap = (status.claimed * BigInt(BURN_PERSONAL_DOUBLE_OUT_BPS)) / BigInt(BPS_DENOMINATOR);
-    if (total >= cap) outAt = now;
-  }
   await c.env.DB.prepare(
-    "UPDATE burn_personal_status SET total_burned_hs = ?, out_at = COALESCE(out_at, ?), updated_at = ? WHERE user = ?",
+    "UPDATE burn_personal_status SET total_burned_hs = ?, updated_at = ? WHERE user = ?",
   )
-    .bind(total.toString(), outAt, now, user)
+    .bind(total.toString(), now, user)
     .run();
 
-  return c.json({ id, totalBurnedHs: total.toString(), out: !!outAt });
+  return c.json({ id, totalBurnedHs: total.toString(), out: !!status.out });
 });
 
 /**
@@ -239,12 +253,16 @@ burn.post("/record", async (c) => {
 burn.post("/claim/top10", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
+  const status = await ensurePersonalRow(c.env, user);
+  const out = !!status.out;
 
-  const rows = await c.env.DB.prepare(
-    "SELECT id, reward_hs FROM burn_top10_settlements WHERE user = ? AND claimed = 0",
-  )
-    .bind(user)
-    .all<{ id: string; reward_hs: string }>();
+  const rows = out
+    ? { results: [] as { id: string; reward_hs: string }[] }
+    : await c.env.DB.prepare(
+      "SELECT id, reward_hs FROM burn_top10_settlements WHERE user = ? AND claimed = 0",
+    )
+      .bind(user)
+      .all<{ id: string; reward_hs: string }>();
 
   let total = 0n;
   for (const r of rows.results ?? []) total += BigInt(r.reward_hs);
@@ -253,17 +271,19 @@ burn.post("/claim/top10", async (c) => {
     `SELECT id, user, kind, reward_token, reward_amount, round, source_ref
        FROM reward_claims
       WHERE user = ? AND claimed = 0 AND reward_token = 'HS'
-        AND kind IN ('burn-weight', 'stake-burn-dividend', 'ai-burn-airdrop')`,
+        AND kind IN (${out ? "'burn-weight'" : "'burn-weight', 'stake-burn-dividend', 'ai-burn-airdrop'"})`,
   )
     .bind(user)
     .all<RewardClaimRow>();
   total += sumRewardRows(rewardRows.results ?? []);
 
-  const referralRows = await c.env.DB.prepare(
-    "SELECT id, reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0 AND reward_token = 'HS'",
-  )
-    .bind(user)
-    .all<{ id: string; reward_amount: string }>();
+  const referralRows = out
+    ? { results: [] as { id: string; reward_amount: string }[] }
+    : await c.env.DB.prepare(
+      "SELECT id, reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0 AND reward_token = 'HS' AND kind IN ('burn-gen1', 'burn-gen2')",
+    )
+      .bind(user)
+      .all<{ id: string; reward_amount: string }>();
   for (const row of referralRows.results ?? []) total += BigInt(row.reward_amount);
 
   if (total <= 0n) return c.json({ amount: "0" });
@@ -282,22 +302,52 @@ burn.post("/claim/top10", async (c) => {
     .bind(user)
     .run();
   await markRewardRowsClaimed(c.env, rewardRows.results ?? [], claim.nonce);
-  await c.env.DB.prepare("UPDATE referral_rewards SET claimed = 1 WHERE user = ? AND claimed = 0 AND reward_token = 'HS'")
+  await c.env.DB.prepare("UPDATE referral_rewards SET claimed = 1 WHERE user = ? AND claimed = 0 AND reward_token = 'HS' AND kind IN ('burn-gen1', 'burn-gen2')")
     .bind(user)
     .run();
-  const status = await ensurePersonalRow(c.env, user);
-  await c.env.DB.prepare(
-    "UPDATE burn_personal_status SET total_personal_claimed_hs = ?, updated_at = ? WHERE user = ?",
-  )
-    .bind((status.claimed + total).toString(), await nowSeconds(c.env), user)
-    .run();
-
   return c.json({
     ...claim,
     top10Rows: rows.results?.length ?? 0,
     rewardRows: rewardRows.results?.length ?? 0,
     referralRows: referralRows.results?.length ?? 0,
   });
+});
+
+/**
+ * POST /burn/claim/personal  个人燃烧权益：仅可领取一次，按累计燃烧 2 倍出局。
+ */
+burn.post("/claim/personal", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+
+  const status = await ensurePersonalRow(c.env, user);
+  if (status.total <= 0n) return c.json({ amount: "0", error: "no burn" }, 400);
+  if (status.out || await hasClaimedPersonalBurn(c.env, user)) {
+    return c.json({ amount: "0", error: "personal burn already claimed" }, 400);
+  }
+
+  const amount = status.total * 2n;
+  const now = await nowSeconds(c.env);
+  const claim = await createClaimSignature(c.env, {
+    user: user as Address,
+    token: c.env.HS_TOKEN.toLowerCase() as Address,
+    payouts: [{ recipient: user as Address, amount }],
+    reason: 8,
+    now,
+  });
+
+  await c.env.DB.prepare(
+    "UPDATE burn_records SET claimed_individual = 1 WHERE user = ? AND claimed_individual = 0",
+  )
+    .bind(user)
+    .run();
+  await c.env.DB.prepare(
+    "UPDATE burn_personal_status SET total_personal_claimed_hs = ?, out_at = COALESCE(out_at, ?), updated_at = ? WHERE user = ?",
+  )
+    .bind(amount.toString(), now, now, user)
+    .run();
+
+  return c.json({ ...claim, personalClaimedHs: amount.toString() });
 });
 
 /**
@@ -312,7 +362,7 @@ burn.post("/airdrop/submit", async (c) => {
   }
 
   const status = await ensurePersonalRow(c.env, user);
-  if (status.total < BigInt(Math.floor(BURN_AIRDROP_MIN_USDT * 1e18))) {
+  if (!await isBurnAirdropEligible(c.env, status.total)) {
     return c.json({ error: "not eligible (need >= 1000U burn)" }, 400);
   }
 
