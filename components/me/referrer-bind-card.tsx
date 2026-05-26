@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useAccount } from "wagmi";
 import { Loader2, Link2 } from "lucide-react";
 import Swal from "sweetalert2";
@@ -43,6 +43,7 @@ export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
   const [defaultReferrer, setDefaultReferrer] = useState<string | null>(null);
   const [refInput, setRefInput] = useState("");
   const [binding, setBinding] = useState(false);
+  const appliedStoredReferrer = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!isConnected) return;
@@ -64,11 +65,12 @@ export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (referrer === null && !refInput) {
+    if (referrer === null && !appliedStoredReferrer.current) {
+      appliedStoredReferrer.current = true;
       const stored = getStoredReferrer();
       if (stored) setRefInput(stored);
     }
-  }, [referrer, refInput]);
+  }, [referrer]);
 
   if (!isConnected) return null;
   if (referrer === undefined) return null;
@@ -136,7 +138,11 @@ export function ReferrerBindCard({ onBound }: { onBound?: () => void }) {
           <input
             type="text"
             value={refInput}
-            onChange={(e) => setRefInput(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              setRefInput(next);
+              if (!next.trim()) clearStoredReferrer();
+            }}
             placeholder={t("me.team.bindPlaceholder")}
             spellCheck={false}
             className="flex-1 rounded-md border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#b829ff]"

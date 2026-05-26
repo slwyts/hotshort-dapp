@@ -33,9 +33,25 @@ interface Portfolio {
   stockUsdt: string;
   pendingUsdt: string;
   totalUsdt: string;
+  raw?: {
+    stockTotalWei?: string;
+  };
 }
 interface RoundResp {
   current: { roundNo: number; poolHs: string; ticketPriceHs: string };
+}
+
+function weiToNumber(value: string | null | undefined): number {
+  try {
+    return Number(formatUnits(BigInt(value ?? "0"), 18));
+  } catch {
+    return 0;
+  }
+}
+
+function formatStockShares(value: number, unit: string): string {
+  const amount = formatNumber(value, value >= 100 ? 0 : 4);
+  return unit === "股" ? `${amount}${unit}` : `${amount} ${unit}`;
 }
 
 export default function HomePage() {
@@ -118,7 +134,7 @@ export default function HomePage() {
   const totalUsdt = portfolio ? Number(portfolio.totalUsdt) : 0;
   const stakeUsdt = portfolio ? Number(portfolio.stakeUsdt) : 0;
   const aiPackageUsdt = portfolio ? Number(portfolio.aiPackageUsdt) : 0;
-  const stockUsdt = portfolio ? Number(portfolio.stockUsdt) : 0;
+  const stockShares = portfolio ? weiToNumber(portfolio.raw?.stockTotalWei) : 0;
   const pendingUsdt = portfolio ? Number(portfolio.pendingUsdt) : 0;
 
   const todayDividendUsdt = stockPriceForDividend ? todayDividend * stockPriceForDividend : 0;
@@ -150,7 +166,7 @@ export default function HomePage() {
             <div className="grid grid-cols-4 gap-1.5 text-center">
               <Mini label={t("home.dapp.staked")} value={`$${formatNumber(stakeUsdt, 0)}`} />
               <Mini label={t("home.dapp.plans")} value={`$${formatNumber(aiPackageUsdt, 0)}`} />
-              <Mini label={t("home.dapp.stock")} value={`$${formatNumber(stockUsdt, 0)}`} accent />
+              <Mini label={t("home.dapp.stock")} value={formatStockShares(stockShares, t("asset.stock.unit"))} accent />
               <Mini label={t("home.dapp.pending")} value={`$${formatNumber(pendingUsdt, 2)}`} />
             </div>
           )}

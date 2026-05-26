@@ -31,9 +31,26 @@ interface Portfolio {
   };
   hsPriceUsdt: number;
   stockPriceUsdt: number;
+  raw?: {
+    stockTotalWei?: string;
+    stockLockedWei?: string;
+  };
 }
 
 type TokenKey = "USDT" | "HS" | "LP";
+
+function weiToNumber(value: string | null | undefined): number {
+  try {
+    return Number(formatUnits(BigInt(value ?? "0"), 18));
+  } catch {
+    return 0;
+  }
+}
+
+function formatStockShares(value: number, unit: string): string {
+  const amount = formatNumber(value, value >= 100 ? 0 : 4);
+  return unit === "股" ? `${amount}${unit}` : `${amount} ${unit}`;
+}
 
 export function AssetsSection() {
   const { address, isConnected } = useAccount();
@@ -105,6 +122,8 @@ export function AssetsSection() {
   const planUsdt = portfolio ? Number(portfolio.aiPackageUsdt) : 0;
   const stockUsdt = portfolio ? Number(portfolio.stockUsdt) : 0;
   const stockLockedUsdt = portfolio ? Number(portfolio.stockLockedUsdt) : 0;
+  const stockTotal = portfolio ? weiToNumber(portfolio.raw?.stockTotalWei) : 0;
+  const stockLocked = portfolio ? weiToNumber(portfolio.raw?.stockLockedWei) : 0;
   const pendingUsdt = portfolio ? Number(portfolio.pendingUsdt) : 0;
   const referralPendingUsdt = portfolio ? Number(portfolio.pending.referral) : 0;
   const pendingHref = referralPendingUsdt > 0 ? "/me?tab=team" : "/me?tab=orders";
@@ -146,8 +165,10 @@ export function AssetsSection() {
               <DappCell label={t("me.assets.plans")} valueUsdt={planUsdt} color="#b829ff" href="/me?tab=orders&type=ai" />
               <DappCell
                 label={t("me.assets.stock")}
-                valueUsdt={stockUsdt}
-                hint={stockLockedUsdt > 0 ? `${t("me.assets.stockLocked")} $${formatNumber(stockLockedUsdt, 0)}` : undefined}
+                valueText={formatStockShares(stockTotal, t("asset.stock.unit"))}
+                hint={stockLocked > 0
+                  ? `${t("me.assets.stockLocked")} ${formatStockShares(stockLocked, t("asset.stock.unit"))} · ≈ $${formatNumber(stockLockedUsdt, 0)}`
+                  : stockUsdt > 0 ? `≈ $${formatNumber(stockUsdt, 0)}` : undefined}
                 color="#f59e0b"
                 href="/ai/dividend"
               />
@@ -245,13 +266,15 @@ function TokenIcon({ token }: { token: TokenKey }) {
 function DappCell({
   label,
   valueUsdt,
+  valueText,
   hint,
   color,
   accent,
   href,
 }: {
   label: string;
-  valueUsdt: number;
+  valueUsdt?: number;
+  valueText?: string;
   hint?: string;
   color: string;
   accent?: boolean;
@@ -267,7 +290,7 @@ function DappCell({
         {href && <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-white/30 transition-colors group-hover:text-white/65" />}
       </div>
       <div className={`mt-1 text-lg font-bold tabular-nums ${accent ? "text-green-400" : "text-white"}`}>
-        ${valueUsdt < 1 ? valueUsdt.toFixed(2) : formatNumber(valueUsdt, 0)}
+        {valueText ?? `$${(valueUsdt ?? 0) < 1 ? (valueUsdt ?? 0).toFixed(2) : formatNumber(valueUsdt ?? 0, 0)}`}
       </div>
       {hint && <div className="mt-0.5 text-[10px] text-white/30">{hint}</div>}
     </>
