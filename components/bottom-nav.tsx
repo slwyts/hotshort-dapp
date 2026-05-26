@@ -37,7 +37,7 @@ export function BottomNav() {
       aria-label="主导航"
       className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/5 backdrop-blur-xl"
       style={{
-        background: "rgba(10, 10, 12, 0.85)",
+        background: "var(--hs-bottom-nav-bg)",
         paddingBottom: "env(safe-area-inset-bottom, 0px)",
       }}
     >

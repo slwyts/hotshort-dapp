@@ -9,6 +9,7 @@ import { LocaleProvider } from "@/components/locale-provider";
 import { SiteHeader } from "@/components/site-header";
 import { BottomNav } from "@/components/bottom-nav";
 import { ReferralHandler } from "@/components/referral-handler";
+import { ThemeProvider } from "@/components/theme-provider";
 
 import "./globals.css";
 
@@ -41,18 +42,20 @@ export default async function RootLayout({
   const initialState = cookieToInitialState(wagmiConfig, hdrs.get("cookie"));
 
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" suppressHydrationWarning>
       <body className="min-h-screen antialiased">
-        <LocaleProvider>
-          <Web3Provider initialConfig={runtimeConfig} initialState={initialState}>
-            <Suspense fallback={null}>
-              <ReferralHandler />
-            </Suspense>
-            <SiteHeader />
-            <main className="min-h-[calc(100vh-3.5rem)]">{children}</main>
-            <BottomNav />
-          </Web3Provider>
-        </LocaleProvider>
+        <ThemeProvider>
+          <LocaleProvider>
+            <Web3Provider initialConfig={runtimeConfig} initialState={initialState}>
+              <Suspense fallback={null}>
+                <ReferralHandler />
+              </Suspense>
+              <SiteHeader />
+              <main className="min-h-[calc(100vh-3.5rem)]">{children}</main>
+              <BottomNav />
+            </Web3Provider>
+          </LocaleProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

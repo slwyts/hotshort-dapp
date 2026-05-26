@@ -145,7 +145,7 @@ export default function AdminAiConfigPage() {
                 </div>
                 <div className="rounded-xl border border-white/10 bg-black/30 p-4">
                   <div className="text-sm font-semibold text-white/75">套餐直推一次性返佣</div>
-                  <div className="mt-1 text-xs text-white/45">按下级购买套餐计算，开拓者固定无返佣。</div>
+                  <div className="mt-1 text-xs text-white/45">按邀请人自身最高套餐计算，开拓者固定无返佣。</div>
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     {AI_TIERS.map((tier) => {
                       const disabled = tier.key === "pioneer";

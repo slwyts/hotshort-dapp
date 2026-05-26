@@ -5,6 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { ConnectButton } from "./connect-button";
 import { LangSwitch } from "./lang-switch";
+import { ThemeToggle } from "./theme-toggle";
 import { useLocale } from "./locale-provider";
 
 /**
@@ -19,7 +20,7 @@ export function SiteHeader() {
   return (
     <header
       className="sticky top-0 z-30 border-b border-white/5 backdrop-blur-xl"
-      style={{ background: "rgba(10, 10, 12, 0.75)" }}
+      style={{ background: "var(--hs-nav-bg)" }}
     >
       <div className="mx-auto flex h-14 w-full max-w-md items-center justify-between gap-2 px-4">
         <Link href="/" className="flex min-w-0 items-center gap-2">
@@ -40,6 +41,7 @@ export function SiteHeader() {
         </Link>
 
         <div className="flex shrink-0 items-center gap-1.5">
+          <ThemeToggle />
           <LangSwitch />
           <ConnectButton />
         </div>

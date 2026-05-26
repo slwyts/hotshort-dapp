@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { type Address, type Hex } from "viem";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
-import { upsertUser, requireBoundUser } from "../lib/users";
+import { requireBoundUser } from "../lib/users";
 import {
   addStock,
   getHoldings,
@@ -11,15 +11,13 @@ import {
   getStockPriceUsdt,
   getHsPriceUsdt,
   sellAvailableStock,
-  usdtToStockWei,
   bigintWei,
 } from "../lib/stocks";
-import { recordDirectReferral } from "../lib/referral";
 import { ulid } from "../lib/ulid";
 import { nowSeconds, todayBeijing } from "../lib/time";
 import { createClaimSignature } from "../lib/claims";
 import { addRewardClaim, markRewardRowsClaimed, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
-import { createAiStockReleaseSchedule } from "../lib/ai-releases";
+import { recordAiPackageOrder } from "../lib/ai-orders";
 import { decimalToWei, hsWeiToUsdtWei, stockWeiToUsdtWei, usdtWeiToHsWei } from "../lib/pricing";
 import { readTokenBalance } from "../lib/token-balance";
 import { verifyVaultDeposit } from "../lib/vault-events";
@@ -163,48 +161,19 @@ ai.post("/buy", async (c) => {
     purpose: 2,
   });
 
-  await upsertUser(c.env, user);
-
-  // 即时赠送股票：USDT × stockGrantBps / BPS_DENOMINATOR / stockPriceUsdt
-  const stockPrice = await getStockPriceUsdt(c.env);
-  const stockGrantUsdt = (t.usdt * t.stockGrantBps) / BPS_DENOMINATOR;
-  const stockGrantWei = usdtToStockWei(stockGrantUsdt, stockPrice);
-
-  const id = ulid();
-  const now = await nowSeconds(c.env);
-  await c.env.DB.prepare(
-    `INSERT INTO ai_orders (id, user, tier, usdt_in, stock_granted, created_at, source_tx_hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(
-      id,
-      user,
-      tier,
-      usdtInWei.toString(),
-      stockGrantWei.toString(),
-      now,
-      body.sourceTxHash,
-    )
-    .run();
-
-  if (stockGrantWei > 0n) {
-    await addStock(c.env, user, stockGrantWei, true);
-    await createAiStockReleaseSchedule(c.env, {
-      orderId: id,
-      user,
-      totalStock: stockGrantWei,
-      createdAt: now,
-    });
-  }
-
-  await recordDirectReferral(c.env, { buyer: user, tier, usdtIn: usdtInWei, orderId: id });
+  const order = await recordAiPackageOrder(c.env, {
+    user,
+    tier,
+    sourceTxHash: body.sourceTxHash,
+    creditReferral: true,
+  });
 
   return c.json({
-    id,
+    id: order.id,
     tier,
-    usdtIn: usdtInWei.toString(),
-    stockGranted: stockGrantWei.toString(),
-    stockPriceUsdt: stockPrice,
+    usdtIn: order.usdtIn,
+    stockGranted: order.stockGranted,
+    stockPriceUsdt: order.stockPriceUsdt,
   });
 });
 

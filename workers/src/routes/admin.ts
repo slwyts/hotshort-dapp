@@ -8,6 +8,7 @@ import { getStockQuote, setManualStockPrice, setStockQuoteMode, syncStockQuote, 
 import { readVaultOwner } from "../lib/vault-owner";
 import { ensureAgentTables, listAgentAlerts, listAgentUsers, normalizeAddress } from "../lib/agent-data";
 import { directReferralConfigKey } from "../lib/referral";
+import { importGenesisNode, normalizeAiTier } from "../lib/genesis-nodes";
 import {
   AI_REFERRAL_DIRECT_BPS,
   AI_TIERS,
@@ -76,17 +77,23 @@ admin.post("/genesis-import", async (c) => {
   const now = Math.floor(Date.now() / 1000);
   let inserted = 0;
   let skipped = 0;
+  let ordersCreated = 0;
   for (const row of body.rows) {
     if (!/^0x[a-f0-9]{40}$/i.test(row.address)) continue;
-    const res = await c.env.DB.prepare(
-      "INSERT OR IGNORE INTO genesis_nodes (address, tier, source, imported_at, imported_by) VALUES (?, ?, 'csv', ?, ?)",
-    )
-      .bind(row.address.toLowerCase(), row.tier, now, owner)
-      .run();
-    if ((res.meta?.changes ?? 0) > 0) inserted++;
+    const tier = normalizeAiTier(row.tier);
+    if (!tier) continue;
+    const res = await importGenesisNode(c.env, {
+      address: row.address,
+      tier,
+      source: "csv",
+      importedAt: now,
+      importedBy: owner,
+    });
+    if (res.inserted) inserted++;
     else skipped++;
+    if (res.orderCreated) ordersCreated++;
   }
-  return c.json({ inserted, skipped });
+  return c.json({ inserted, skipped, ordersCreated });
 });
 
 /** POST /admin/genesis-scan  从 BscScan 扫描历史 USDT 入账 */

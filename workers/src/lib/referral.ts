@@ -73,23 +73,24 @@ export async function getDirectReferralBps(env: Env, tier: AiTierKey): Promise<n
 
 /**
  * 套餐购买的直推一次性返佣（USDT 计价，USDT 领取）。
- * §2.4(1) 直推无等级压制，下级高于上级也全额拿。
+ * §2.4(1) 直推按邀请人自身最高套餐比例计算，无等级压制。
  * §2.1 开拓者 (pioneer) 无返佣。
  */
 export async function recordDirectReferral(env: Env, params: {
   buyer: string;
-  tier: AiTierKey;
   usdtIn: bigint;
   orderId: string;
 }): Promise<void> {
-  const { buyer, tier, usdtIn, orderId } = params;
-  const bps = await getDirectReferralBps(env, tier);
-  if (bps === 0) return;
+  const { buyer, usdtIn, orderId } = params;
 
   const path = await getPath(env, buyer);
   const upper = path.level1;
   if (!upper) return;
-  if (!await hasDirectReferralQualification(env, upper)) return;
+  const upperTier = await getUserHighestTier(env, upper);
+  if (!upperTier || TIER_PRIORITY[upperTier] <= TIER_PRIORITY.pioneer) return;
+
+  const bps = await getDirectReferralBps(env, upperTier);
+  if (bps === 0) return;
 
   const reward = (usdtIn * BigInt(bps)) / BigInt(BPS_DENOMINATOR);
   if (reward <= 0n) return;

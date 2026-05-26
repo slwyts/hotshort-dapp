@@ -59,7 +59,7 @@ export default function AdminGenesisPage() {
     if (!token) return;
     setImporting(true);
     try {
-      const r = await api.post<{ inserted: number; skipped: number }>(
+      const r = await api.post<{ inserted: number; skipped: number; ordersCreated?: number }>(
         endpoints.adminGenesisImport,
         { rows },
         token,
@@ -67,7 +67,7 @@ export default function AdminGenesisPage() {
       await Swal.fire({
         icon: "success",
         title: "导入完成",
-        text: `新增 ${r.inserted} 条，跳过 ${r.skipped} 条（已存在）`,
+        text: `新增 ${r.inserted} 条，跳过 ${r.skipped} 条（已存在），创建权益订单 ${r.ordersCreated ?? 0} 条`,
         background: "#141419",
         color: "#fff",
         confirmButtonColor: "#b829ff",

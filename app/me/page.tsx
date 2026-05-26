@@ -57,9 +57,9 @@ function MeContent() {
       <Card>
         <CardContent className="space-y-3 py-4">
           <div className="flex items-center gap-3">
-            <div className="h-12 w-12 shrink-0 rounded-full bg-gradient-to-br from-[#00c6ff] to-[#b829ff] p-[2px]">
-              <div className="flex h-full w-full items-center justify-center rounded-full bg-black">
-                <Wallet className="h-5 w-5 text-white" />
+            <div className="me-wallet-avatar h-12 w-12 shrink-0 rounded-full bg-gradient-to-br from-[#00c6ff] to-[#b829ff] p-[2px]">
+              <div className="me-wallet-avatar-core flex h-full w-full items-center justify-center rounded-full">
+                <Wallet className="me-wallet-avatar-icon h-5 w-5" />
               </div>
             </div>
             <div className="min-w-0 flex-1">
