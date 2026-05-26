@@ -31,6 +31,8 @@ interface BurnMe {
   personalClaimableHs: string;
   personalClaimed: boolean;
   out: boolean;
+  promotionActive?: boolean;
+  promotionActivationUsdt?: string;
   top10PendingHs: string;
   eligibleAirdrop: boolean;
 }
@@ -62,6 +64,15 @@ const ALLOC_TABLE = [
   { key: "aiStock", labelKey: "burn.alloc.aiStock", bps: BURN_ALLOCATION_BPS.aiStock },
   { key: "top10", labelKey: "burn.alloc.top10", bps: BURN_ALLOCATION_BPS.top10 },
 ];
+
+function weiToNumber(value: string | number | bigint | null | undefined): number {
+  try {
+    const text = String(value ?? "0");
+    return /^\d+$/.test(text) ? Number(formatUnits(BigInt(text), 18)) : 0;
+  } catch {
+    return 0;
+  }
+}
 
 export default function BurnPage() {
   const { address, isConnected } = useAccount();
@@ -277,13 +288,14 @@ export default function BurnPage() {
     }
   };
 
-  const totalBurn = me ? Number(formatUnits(BigInt(me.totalBurnedHs), 18)) : 0;
-  const totalBurnUsdt = me ? Number(formatUnits(BigInt(me.totalBurnedUsdt), 18)) : 0;
-  const top10Pending = me ? Number(formatUnits(BigInt(me.top10PendingHs), 18)) : 0;
-  const personalClaimable = me ? Number(formatUnits(BigInt(me.personalClaimableHs), 18)) : 0;
-  const personalClaimed = me ? Number(formatUnits(BigInt(me.personalClaimedHs), 18)) : 0;
-  const currentWeeklyBurn = round ? Number(formatUnits(BigInt(round.current.totalBurnHs), 18)) : 0;
-  const currentTop10Pool = round ? Number(formatUnits(BigInt(round.current.top10PoolHs), 18)) : 0;
+  const totalBurn = weiToNumber(me?.totalBurnedHs);
+  const totalBurnUsdt = weiToNumber(me?.totalBurnedUsdt);
+  const top10Pending = weiToNumber(me?.top10PendingHs);
+  const personalClaimable = weiToNumber(me?.personalClaimableHs);
+  const personalClaimed = weiToNumber(me?.personalClaimedHs);
+  const currentWeeklyBurn = weiToNumber(round?.current?.totalBurnHs);
+  const currentTop10Pool = weiToNumber(round?.current?.top10PoolHs);
+  const promotionActive = Boolean(me?.promotionActive || totalBurnUsdt >= BURN_PROMOTION_ACTIVATE_USDT);
 
   return (
     <PageShell>
@@ -334,6 +346,17 @@ export default function BurnPage() {
               {me.out || me.personalClaimed
                 ? t("burn.personalHint.done", { amount: formatNumber(personalClaimed, 2) })
                 : t("burn.personalHint.active")}
+            </div>
+          )}
+
+          {me && (
+            <div className={cn(
+              "rounded-md border px-3 py-2 text-[11px] leading-relaxed",
+              promotionActive ? "border-[#00c6ff]/20 bg-[#00c6ff]/5 text-[#8fe7ff]" : "border-yellow-400/20 bg-yellow-400/5 text-yellow-100/75",
+            )}>
+              {promotionActive
+                ? t("burn.promotion.active", { min: BURN_PROMOTION_ACTIVATE_USDT })
+                : t("burn.promotion.inactive", { min: BURN_PROMOTION_ACTIVATE_USDT, usdt: formatNumber(totalBurnUsdt, 2) })}
             </div>
           )}
 
@@ -414,7 +437,7 @@ export default function BurnPage() {
                     <span className="font-mono text-xs">{shortenAddress(r.user, 4)}</span>
                   </div>
                   <span className="font-bold tabular-nums">
-                    {formatNumber(Number(BigInt(String(r.burn_hs))) / 1e18, 2)}
+                    {formatNumber(weiToNumber(r.burn_hs), 2)}
                   </span>
                 </div>
               ))}

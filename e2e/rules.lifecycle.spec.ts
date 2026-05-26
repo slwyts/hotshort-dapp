@@ -416,7 +416,10 @@ test.describe("README rule lifecycle scripts", () => {
 
     const beforeSwapTime = await apiRequest<{ nowSeconds: number }>("/__test/time");
     const beforeSwapHoldings = await apiRequest<HoldingsResponse>("/ai/holdings", { headers: bearer(aliceJwt) });
+    const hsQuote = await apiRequest<{ priceUsdt: number }>("/oracle/hs-price");
+    const stockQuote = await apiRequest<{ priceUsdt: number }>("/oracle/stock-price");
     const swapAmount = parseEther("1000");
+    const expectedSwapStock = (swapAmount * BigInt(Math.floor((hsQuote.priceUsdt / stockQuote.priceUsdt) * 1e18))) / parseEther("1");
     const swapTxHash = await depositToVault(ALICE, HS_TOKEN as Address, swapAmount, 5);
     const swap = await apiRequest<{ id: string; stockOut: string; stockLocked: string; unlocksAt: null }>("/ai/swap", {
       method: "POST",
@@ -424,11 +427,11 @@ test.describe("README rule lifecycle scripts", () => {
       body: JSON.stringify({ sourceTxHash: swapTxHash, hsAmountWei: swapAmount.toString() }),
     });
     expect(beforeSwapTime.nowSeconds).toBeGreaterThan(0);
-    expect(BigInt(swap.stockOut)).toBe(parseEther("1"));
+    expect(BigInt(swap.stockOut)).toBe(expectedSwapStock);
     expect(BigInt(swap.stockLocked)).toBe(0n);
     expect(swap.unlocksAt).toBeNull();
     const afterSwapHoldings = await apiRequest<HoldingsResponse>("/ai/holdings", { headers: bearer(aliceJwt) });
-    expect(BigInt(afterSwapHoldings.totalStock) - BigInt(beforeSwapHoldings.totalStock)).toBe(parseEther("1"));
+    expect(BigInt(afterSwapHoldings.totalStock) - BigInt(beforeSwapHoldings.totalStock)).toBe(expectedSwapStock);
     expect(BigInt(afterSwapHoldings.lockedStock) - BigInt(beforeSwapHoldings.lockedStock)).toBe(0n);
   });
 

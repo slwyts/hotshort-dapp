@@ -10,16 +10,27 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
+import { AI_REFERRAL_DIRECT_BPS, AI_TIERS, type AiTierKey } from "@/lib/constants/business-rules";
 
 interface AiCfg {
   volumeMin: number;
   volumeMax: number;
   ratioBps: number;
+  directReferralBps: Record<AiTierKey, number>;
+}
+
+function defaultDirectReferralBps(): Record<AiTierKey, number> {
+  return { ...AI_REFERRAL_DIRECT_BPS };
 }
 
 export default function AdminAiConfigPage() {
   const { jwt, signIn } = useSiweJwt();
-  const [cfg, setCfg] = useState<AiCfg>({ volumeMin: 100_000, volumeMax: 200_000, ratioBps: 100 });
+  const [cfg, setCfg] = useState<AiCfg>({
+    volumeMin: 100_000,
+    volumeMax: 200_000,
+    ratioBps: 100,
+    directReferralBps: defaultDirectReferralBps(),
+  });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -27,7 +38,7 @@ export default function AdminAiConfigPage() {
     setLoading(true);
     try {
       const r = await api.get<AiCfg>(endpoints.adminAiConfig);
-      setCfg(r);
+      setCfg({ ...r, directReferralBps: { ...defaultDirectReferralBps(), ...(r.directReferralBps ?? {}) } });
     } catch {
       /* 使用默认值 */
     } finally {
@@ -42,7 +53,11 @@ export default function AdminAiConfigPage() {
   const save = async () => {
     const token = jwt ?? (await signIn());
     if (!token) return;
-    if (cfg.volumeMin <= 0 || cfg.volumeMax < cfg.volumeMin || cfg.ratioBps < 0) {
+    const badDirectRate = AI_TIERS.some((tier) => {
+      const bps = cfg.directReferralBps[tier.key];
+      return tier.key !== "pioneer" && (!Number.isInteger(bps) || bps < 0 || bps > 10_000);
+    });
+    if (cfg.volumeMin <= 0 || cfg.volumeMax < cfg.volumeMin || cfg.ratioBps < 0 || badDirectRate) {
       await Swal.fire({ icon: "warning", title: "参数无效", text: "请检查区间和比例设置", background: "#141419", color: "#fff" });
       return;
     }
@@ -126,6 +141,40 @@ export default function AdminAiConfigPage() {
                   <div className="text-xs text-white/50">预估每日分红池</div>
                   <div className="mt-1 text-lg font-bold text-[#00c6ff]">
                     ≈ {Math.round(dailyExample).toLocaleString("en-US")} USDT
+                  </div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                  <div className="text-sm font-semibold text-white/75">套餐直推一次性返佣</div>
+                  <div className="mt-1 text-xs text-white/45">按下级购买套餐计算，开拓者固定无返佣。</div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {AI_TIERS.map((tier) => {
+                      const disabled = tier.key === "pioneer";
+                      const percent = (cfg.directReferralBps[tier.key] ?? 0) / 100;
+                      return (
+                        <div key={tier.key}>
+                          <label className="text-xs font-medium text-white/60">{tier.label} {tier.usdt}U</label>
+                          <div className="mt-1 flex items-center gap-2">
+                            <Input
+                              type="number"
+                              min={0}
+                              max={disabled ? 0 : 100}
+                              step="0.01"
+                              disabled={disabled}
+                              value={percent.toFixed(2)}
+                              onChange={(e) => setCfg({
+                                ...cfg,
+                                directReferralBps: {
+                                  ...cfg.directReferralBps,
+                                  [tier.key]: Math.round(Number(e.target.value) * 100),
+                                  pioneer: 0,
+                                },
+                              })}
+                            />
+                            <span className="text-sm text-white/40">%</span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
                 <Button onClick={save} disabled={saving} className="ml-auto">

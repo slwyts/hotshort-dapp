@@ -12,6 +12,7 @@ import { hsWeiToUsdtWei } from "../lib/pricing";
 import {
   BURN_ALLOCATION_BPS,
   BURN_AIRDROP_MIN_USDT,
+  BURN_PROMOTION_ACTIVATE_USDT,
   BPS_DENOMINATOR,
 } from "@/lib/constants/business-rules";
 
@@ -66,6 +67,7 @@ burn.get("/me", async (c) => {
   const personalClaimed = await hasClaimedPersonalBurn(c.env, user);
   const personalClaimable = status.total > 0n && !status.out && !personalClaimed ? status.total * 2n : 0n;
   const totalBurnedUsdt = await hsWeiToUsdtWei(c.env, status.total);
+  const promotionActivationUsdt = BigInt(BURN_PROMOTION_ACTIVATE_USDT) * 10n ** 18n;
 
   // 我作为 Top10 的未领奖
   const pendingRows = await c.env.DB.prepare(
@@ -115,6 +117,8 @@ burn.get("/me", async (c) => {
     personalClaimableHs: personalClaimable.toString(),
     personalClaimed,
     out: !!status.out,
+    promotionActive: totalBurnedUsdt >= promotionActivationUsdt,
+    promotionActivationUsdt: promotionActivationUsdt.toString(),
     top10PendingHs: top10Pending.toString(),
     pendingBreakdown: {
       top10Hs: top10Reward.toString(),

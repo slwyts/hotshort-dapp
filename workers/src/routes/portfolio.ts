@@ -4,6 +4,8 @@ import { requireUser } from "./auth";
 import { nowSeconds } from "../lib/time";
 import { readHsPriceUsdt } from "../lib/hs-price";
 import { getStockPriceUsdt } from "../lib/stocks";
+import { stakeAssetWeiToUsdtWei } from "../lib/pricing";
+import type { StakeAsset } from "@/lib/constants/business-rules";
 
 export const portfolio = new Hono<{ Bindings: Env }>();
 
@@ -59,7 +61,7 @@ function weiToNumber(value: bigint): number {
  * 返回当前用户在 DApp 内的总资产（USDT 等值）。
  *
  * 包含：
- *   - 进行中的质押本金（USDT/HS/LP × hsPrice 折算；LP 暂按持仓计入但不计 USD）
+ *   - 进行中的质押本金（USDT/HS/LP 按当前价值折算）
  *   - AI 套餐累计投入（usdt_in）
  *   - 股票总持仓（totalStock × stockPrice，含锁定）
  *   - 待领：stake 到期未领 / 彩票中奖 / AI 分红 / 燃烧周榜 / 团队奖励
@@ -83,10 +85,9 @@ portfolio.get("/", async (c) => {
   for (const r of stakeRow.results ?? []) {
     const amountWei = parseWei(r.amount);
     stakeOrdersWei += amountWei;
-    const amount = weiToNumber(amountWei);
-    if (r.asset === "USDT") stakeUsdtNum += amount;
-    else if (r.asset === "HS") stakeUsdtNum += amount * prices.hs;
-    // LP 价值复杂（需要拉 PancakePair 储备），暂折半保守按 HS×2 估算或忽略；这里按 0 处理
+    if (r.asset === "USDT" || r.asset === "HS" || r.asset === "LP") {
+      stakeUsdtNum += weiToNumber(await stakeAssetWeiToUsdtWei(c.env, r.asset as StakeAsset, amountWei));
+    }
   }
 
   // 2) AI 套餐 usdt_in 累计
@@ -124,10 +125,10 @@ portfolio.get("/", async (c) => {
     .all<{ asset: string; amount: string; monthly_rate_bps: number; lock_months: number }>();
   let stakePendingUsdt = 0;
   for (const o of stakeMatured.results ?? []) {
-    const principalNum = weiToNumber(parseWei(o.amount));
-    const principalUsdt = o.asset === "USDT" ? principalNum : o.asset === "HS" ? principalNum * prices.hs : 0;
-    const yieldUsdt = (principalUsdt * o.monthly_rate_bps * o.lock_months) / 10_000;
-    stakePendingUsdt += yieldUsdt * 0.95; // 95% 给用户，5% 燃烧
+    if (o.asset !== "USDT" && o.asset !== "HS" && o.asset !== "LP") continue;
+    const yieldAssetWei = (parseWei(o.amount) * BigInt(o.monthly_rate_bps) * BigInt(o.lock_months)) / 10_000n;
+    const yieldUsdtWei = await stakeAssetWeiToUsdtWei(c.env, o.asset as StakeAsset, yieldAssetWei);
+    stakePendingUsdt += weiToNumber((yieldUsdtWei * 9_500n) / 10_000n); // 95% 给用户，5% 燃烧
   }
 
   // 4b) 彩票中奖未领（HS）

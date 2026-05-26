@@ -36,6 +36,7 @@ export const ai = new Hono<{ Bindings: Env }>();
 
 const TIER_MAP = new Map(AI_TIERS.map((t) => [t.key as AiTierKey, t]));
 const WEI_SCALE = 10n ** 18n;
+const AI_AIRDROP_MIN_HOLD_SECONDS = 30 * 24 * 60 * 60;
 
 function parsePositiveWei(value: unknown): bigint | null {
   if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
@@ -52,6 +53,32 @@ function quoteStockSale(stockWei: bigint, stockPriceUsdt: number, hsPriceUsdt: n
   const usdtOut = (stockWei * stockPriceWei) / WEI_SCALE;
   const hsOut = (usdtOut * WEI_SCALE) / hsPriceWei;
   return { usdtOut, hsOut };
+}
+
+function monthlyAirdropPeriod(now: number): { previousMonth: string; currentMonthStart: number } {
+  const beijing = new Date(now * 1000 + 8 * 3600 * 1000);
+  const year = beijing.getUTCFullYear();
+  const monthIndex = beijing.getUTCMonth();
+  const currentMonthStart = Math.floor((Date.UTC(year, monthIndex, 1) - 8 * 3600 * 1000) / 1000);
+  const previous = new Date(Date.UTC(year, monthIndex - 1, 1));
+  const previousMonth = `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, "0")}`;
+  return { previousMonth, currentMonthStart };
+}
+
+async function firstStockAcquiredAt(env: Env, user: string): Promise<number | null> {
+  const [order, swap, holding] = await Promise.all([
+    env.DB.prepare("SELECT MIN(created_at) AS at FROM ai_orders WHERE user = ? AND stock_granted != '0'")
+      .bind(user)
+      .first<{ at: number | null }>(),
+    env.DB.prepare("SELECT MIN(swapped_at) AS at FROM stock_swaps WHERE user = ?")
+      .bind(user)
+      .first<{ at: number | null }>(),
+    env.DB.prepare("SELECT updated_at AS at FROM stock_holdings WHERE user = ? AND total_stock != '0'")
+      .bind(user)
+      .first<{ at: number | null }>(),
+  ]);
+  const candidates = [order?.at, swap?.at, holding?.at].filter((value): value is number => Number.isFinite(value ?? NaN) && (value ?? 0) > 0);
+  return candidates.length ? Math.min(...candidates) : null;
 }
 
 /** GET /ai/holdings  当前用户股票持仓（含锁仓） */
@@ -334,11 +361,20 @@ ai.get("/dividend/today", async (c) => {
     .first<{ date: string; stock_share: string; claimed: number }>();
   const h = await getHoldings(c.env, user);
   const stock = await getStockQuote(c.env);
+  const firstStockAt = await firstStockAcquiredAt(c.env, user);
+  const now = await nowSeconds(c.env);
+  const { previousMonth, currentMonthStart } = monthlyAirdropPeriod(now);
   return c.json({
     today,
     stock,
     holdings: { totalStock: h.total.toString(), lockedStock: h.locked.toString() },
     dividend: div ?? { date: today, stock_share: "0", claimed: 0 },
+    airdrop: {
+      claimPeriod: previousMonth,
+      currentMonthStart,
+      firstStockAt,
+      monthlyEligibleAt: firstStockAt ? firstStockAt + AI_AIRDROP_MIN_HOLD_SECONDS : null,
+    },
   });
 });
 
@@ -435,29 +471,36 @@ ai.post("/airdrop/claim", async (c) => {
   const minStock = BigInt(AI_AIRDROP_MIN_DAILY_STOCK) * 10n ** 18n;
   if (holdings.total < minStock) return c.json({ error: "not enough stock" }, 400);
 
+  const now = await nowSeconds(c.env);
+  const firstStockAt = await firstStockAcquiredAt(c.env, user);
+  const monthlyEligibleAt = firstStockAt ? firstStockAt + AI_AIRDROP_MIN_HOLD_SECONDS : null;
+  if (!monthlyEligibleAt || now < monthlyEligibleAt) {
+    return c.json({ error: "stock not held one month", monthlyEligibleAt }, 400);
+  }
+
   const hsBalance = await readTokenBalance(c.env, c.env.HS_TOKEN.toLowerCase() as Address, user as Address);
   const hsValueUsdt = await hsWeiToUsdtWei(c.env, hsBalance);
   const minHsValue = BigInt(AI_AIRDROP_MIN_HS_USDT) * 10n ** 18n;
   if (hsValueUsdt < minHsValue) return c.json({ error: "not enough HS holding" }, 400);
 
-  const date = await todayBeijing(c.env);
+  const { previousMonth, currentMonthStart } = monthlyAirdropPeriod(now);
   const existingBase = await c.env.DB.prepare(
     "SELECT id FROM reward_claims WHERE user = ? AND kind = 'ai-base-airdrop' AND source_ref = ?",
   )
-    .bind(user, date)
+    .bind(user, previousMonth)
     .first<{ id: string }>();
 
   if (!existingBase) {
     const stockValueUsdt = await stockWeiToUsdtWei(c.env, holdings.total);
     const annualUsdt = (stockValueUsdt * BigInt(AI_AIRDROP_BASE_APR_BPS)) / BigInt(BPS_DENOMINATOR);
-    const dailyUsdt = annualUsdt / 365n;
-    const dailyHs = await usdtWeiToHsWei(c.env, dailyUsdt);
+    const monthlyUsdt = annualUsdt / 12n;
+    const monthlyHs = await usdtWeiToHsWei(c.env, monthlyUsdt);
     await addRewardClaim(c.env, {
       user,
       kind: "ai-base-airdrop",
       token: "HS",
-      amount: dailyHs,
-      sourceRef: date,
+      amount: monthlyHs,
+      sourceRef: previousMonth,
     });
   }
 
@@ -465,9 +508,12 @@ ai.post("/airdrop/claim", async (c) => {
     `SELECT id, user, kind, reward_token, reward_amount, round, source_ref
        FROM reward_claims
       WHERE user = ? AND claimed = 0 AND reward_token = 'HS'
-        AND kind IN ('ai-base-airdrop', 'ai-burn-airdrop')`,
+        AND (
+          (kind = 'ai-base-airdrop' AND source_ref = ?)
+          OR (kind = 'ai-burn-airdrop' AND created_at < ?)
+        )`,
   )
-    .bind(user)
+    .bind(user, previousMonth, currentMonthStart)
     .all<RewardClaimRow>();
   const total = sumRewardRows(rows.results ?? []);
   if (total <= 0n) return c.json({ token: null, amount: "0", note: "no claimable" });

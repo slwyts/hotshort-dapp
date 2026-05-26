@@ -7,9 +7,13 @@ import { scanGenesisTransfers } from "../lib/genesis-scan";
 import { getStockQuote, setManualStockPrice, setStockQuoteMode, syncStockQuote, type StockQuoteMode } from "../lib/stocks";
 import { readVaultOwner } from "../lib/vault-owner";
 import { ensureAgentTables, listAgentAlerts, listAgentUsers, normalizeAddress } from "../lib/agent-data";
+import { directReferralConfigKey } from "../lib/referral";
 import {
+  AI_REFERRAL_DIRECT_BPS,
+  AI_TIERS,
   STAKE_ASSETS,
   STAKE_LOCK_MONTHS,
+  type AiTierKey,
   type StakeAsset,
   type StakeLockMonths,
 } from "@/lib/constants/business-rules";
@@ -101,15 +105,23 @@ admin.post("/genesis-scan", async (c) => {
 admin.get("/ai-config", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
+  const directKeys = AI_TIERS.map((tier) => directReferralConfigKey(tier.key));
   const rs = await c.env.DB.prepare(
-    "SELECT key, value FROM admin_config WHERE key IN ('stock_volume_min_usdt','stock_volume_max_usdt','stock_dividend_ratio_bps')",
-  ).all<{ key: string; value: string }>();
+    `SELECT key, value FROM admin_config WHERE key IN (${["stock_volume_min_usdt", "stock_volume_max_usdt", "stock_dividend_ratio_bps", ...directKeys].map(() => "?").join(",")})`,
+  )
+    .bind("stock_volume_min_usdt", "stock_volume_max_usdt", "stock_dividend_ratio_bps", ...directKeys)
+    .all<{ key: string; value: string }>();
   const map = new Map<string, string>();
   for (const r of rs.results ?? []) map.set(r.key, r.value);
+  const directReferralBps: Partial<Record<AiTierKey, number>> = {};
+  for (const tier of AI_TIERS) {
+    directReferralBps[tier.key] = Number(map.get(directReferralConfigKey(tier.key)) ?? AI_REFERRAL_DIRECT_BPS[tier.key]);
+  }
   return c.json({
     volumeMin: Number(map.get("stock_volume_min_usdt") ?? 100_000),
     volumeMax: Number(map.get("stock_volume_max_usdt") ?? 200_000),
     ratioBps: Number(map.get("stock_dividend_ratio_bps") ?? 100),
+    directReferralBps,
   });
 });
 
@@ -120,6 +132,7 @@ admin.post("/ai-config", async (c) => {
     volumeMin?: number;
     volumeMax?: number;
     ratioBps?: number;
+    directReferralBps?: Partial<Record<AiTierKey, number>>;
   };
   if (
     !Number.isFinite(body.volumeMin) ||
@@ -137,6 +150,17 @@ admin.post("/ai-config", async (c) => {
     ["stock_volume_max_usdt", String(body.volumeMax)],
     ["stock_dividend_ratio_bps", String(Math.floor(body.ratioBps!))],
   ];
+  if (body.directReferralBps && typeof body.directReferralBps === "object") {
+    for (const tier of AI_TIERS) {
+      if (tier.key === "pioneer") {
+        updates.push([directReferralConfigKey(tier.key), "0"]);
+        continue;
+      }
+      const bps = body.directReferralBps[tier.key] ?? AI_REFERRAL_DIRECT_BPS[tier.key];
+      if (!Number.isInteger(bps) || bps < 0 || bps > 10_000) return c.json({ error: "bad direct referral bps" }, 400);
+      updates.push([directReferralConfigKey(tier.key), String(bps)]);
+    }
+  }
   for (const [k, v] of updates) {
     await c.env.DB.prepare(
       "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES (?, ?, ?, ?)",

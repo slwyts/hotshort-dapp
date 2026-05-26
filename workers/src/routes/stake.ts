@@ -6,8 +6,7 @@ import { upsertUser, createStakeOrder, requireBoundUser } from "../lib/users";
 import { getCurrentRateBps } from "../lib/rates";
 import { nowSeconds } from "../lib/time";
 import { createClaimSignature } from "../lib/claims";
-import { stakeAssetWeiToUsdtWei, tokenForStakeAsset } from "../lib/pricing";
-import { readHsPriceUsdt } from "../lib/hs-price";
+import { stakeAssetYieldWeiToHsWei, tokenForStakeAsset } from "../lib/pricing";
 import { verifyVaultDeposit } from "../lib/vault-events";
 import {
   STAKE_ASSETS,
@@ -109,7 +108,7 @@ stake.post("/orders", async (c) => {
  *   注意：合约只支持单签名 claim，所以 5% 销毁这一步走 admin signer 单独打到 0xdEaD（withdrawTo）。
  *   为保持架构对称，这里只签 95% 的用户领取签名；销毁 5% HS 由 cron 或 admin 手动触发。
  *   - 收益币种 = HS（按 README §1.1 "到期收益以 HS 发放"）
- *   - 收益金额 = 本金 (USDT 等值) * monthlyRateBps * lockMonths / BPS_DENOMINATOR / hsPriceUsdt
+ *   - 收益金额先按质押资产本位计算，再折算为 HS 发放
  */
 stake.post("/claim", async (c) => {
   const user = await requireUser(c);
@@ -140,23 +139,13 @@ stake.post("/claim", async (c) => {
     return c.json({ error: "not matured" }, 400);
   }
 
-  // 收益（USDT 等值）= 本金 USDT 价值 * monthly_rate * months
+  // 质押金本位收益 = 本金数量 * monthly_rate * months
   const principal = BigInt(order.amount);
-  const principalUsdt = await stakeAssetWeiToUsdtWei(c.env, order.asset as StakeAsset, principal);
-  const yieldUsdt =
-    (principalUsdt * BigInt(order.monthly_rate_bps) * BigInt(order.lock_months)) /
+  const yieldAsset =
+    (principal * BigInt(order.monthly_rate_bps) * BigInt(order.lock_months)) /
     BigInt(BPS_DENOMINATOR);
-
-  // HS 价格（USDT 计价）：实时读 PancakeSwap pair，30s 缓存
-  const hsPrice = await readHsPriceUsdt(c.env);
-  if (hsPrice <= 0) return c.json({ error: "hs price unavailable" }, 503);
-
-  // yieldHs = yieldUsdt / hsPrice
-  // 整型保护：用 1e9 精度做近似
-  const PRECISION = 10n ** 9n;
-  const priceScaled = BigInt(Math.floor(hsPrice * 1e9));
-  if (priceScaled === 0n) return c.json({ error: "hs price zero" }, 503);
-  const yieldHs = (yieldUsdt * PRECISION) / priceScaled;
+  const yieldHs = await stakeAssetYieldWeiToHsWei(c.env, order.asset as StakeAsset, yieldAsset);
+  if (yieldHs <= 0n) return c.json({ error: "yield unavailable" }, 503);
 
   // 5% 燃料由 Worker 签名绑定到 payouts，Vault 只验证列表 hash 并一次交易转完。
   const fuelHs = (yieldHs * BigInt(STAKE_FUEL_BURN_BPS)) / BigInt(BPS_DENOMINATOR);
@@ -187,5 +176,7 @@ stake.post("/claim", async (c) => {
     ...claim,
     claimableHs: userHs.toString(),
     fuelBurnHs: fuelHs.toString(),
+    yieldAssetAmount: yieldAsset.toString(),
+    yieldAsset: order.asset,
   });
 });

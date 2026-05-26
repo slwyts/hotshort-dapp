@@ -56,6 +56,21 @@ async function hasDirectReferralQualification(env: Env, user: string): Promise<b
   return tier !== null && TIER_PRIORITY[tier] > TIER_PRIORITY.pioneer;
 }
 
+export function directReferralConfigKey(tier: AiTierKey): string {
+  return `ai_direct_referral_${tier}_bps`;
+}
+
+export async function getDirectReferralBps(env: Env, tier: AiTierKey): Promise<number> {
+  if (tier === "pioneer") return 0;
+  const fallback = AI_REFERRAL_DIRECT_BPS[tier] ?? 0;
+  const row = await env.DB.prepare("SELECT value FROM admin_config WHERE key = ?")
+    .bind(directReferralConfigKey(tier))
+    .first<{ value: string }>();
+  const configured = Number(row?.value);
+  if (!Number.isInteger(configured) || configured < 0 || configured > 10_000) return fallback;
+  return configured;
+}
+
 /**
  * 套餐购买的直推一次性返佣（USDT 计价，USDT 领取）。
  * §2.4(1) 直推无等级压制，下级高于上级也全额拿。
@@ -68,7 +83,7 @@ export async function recordDirectReferral(env: Env, params: {
   orderId: string;
 }): Promise<void> {
   const { buyer, tier, usdtIn, orderId } = params;
-  const bps = AI_REFERRAL_DIRECT_BPS[tier] ?? 0;
+  const bps = await getDirectReferralBps(env, tier);
   if (bps === 0) return;
 
   const path = await getPath(env, buyer);

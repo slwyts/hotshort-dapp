@@ -400,7 +400,9 @@ function StakeOrders({ orders, expanded, setExpanded, claimStake, claiming }: {
       {orders.map((order) => {
         const principal = weiToNumber(order.amount);
         const matured = Math.floor(Date.now() / 1000) >= order.matures_at;
-        const expectedUsdt = (principal * order.monthly_rate_bps * order.lock_months) / 10_000;
+        const expectedAsset = (principal * order.monthly_rate_bps * order.lock_months) / 10_000;
+        const expectedFuel = expectedAsset * 0.05;
+        const expectedNet = expectedAsset - expectedFuel;
         const open = expanded === order.id;
         return (
           <Card key={order.id} className={cn(matured && !order.claimed && "border-[#00c6ff]/40 bg-[#00c6ff]/5", order.claimed && "opacity-60")}>
@@ -416,7 +418,7 @@ function StakeOrders({ orders, expanded, setExpanded, claimStake, claiming }: {
                 <div className="flex items-center gap-2 text-right">
                   <div>
                     <div className="text-[10px] text-white/35">预计收益</div>
-                    <div className="font-black text-[#b829ff]">≈ {formatNumber(expectedUsdt, 2)} U</div>
+                    <div className="font-black text-[#b829ff]">≈ {formatNumber(expectedAsset, 4)} {order.asset}</div>
                   </div>
                   <ChevronDown className={cn("h-4 w-4 text-white/35 transition", open && "rotate-180")} />
                 </div>
@@ -426,9 +428,10 @@ function StakeOrders({ orders, expanded, setExpanded, claimStake, claiming }: {
                   <div className="grid grid-cols-2 gap-2">
                     <DetailRow label="锁仓周期" value={`${order.lock_months} 个月`} />
                     <DetailRow label="月化收益" value={bpsToPercent(order.monthly_rate_bps)} />
+                    <DetailRow label="预计到账" value={`约 ${formatNumber(expectedNet, 4)} ${order.asset} 等值 HS`} />
                     <DetailRow label="开始时间" value={dateText(order.started_at)} />
                     <DetailRow label="到期时间" value={dateText(order.matures_at)} />
-                    <DetailRow label="燃料销毁" value={`约 ${formatNumber(expectedUsdt * 0.05, 2)} U 等值 HS`} />
+                    <DetailRow label="燃料销毁" value={`约 ${formatNumber(expectedFuel, 4)} ${order.asset} 等值 HS`} />
                     <DetailRow label="交易" value={displayTx(order.source_tx_hash)} />
                   </div>
                   {!order.claimed && matured && <Button onClick={() => claimStake(order.id)} disabled={claiming === order.id} className="w-full">{claiming === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "领取收益"}</Button>}

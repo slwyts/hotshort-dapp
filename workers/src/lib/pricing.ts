@@ -106,3 +106,10 @@ export async function stakeAssetWeiToUsdtWei(env: Env, asset: StakeAsset, amount
   if (asset === "HS") return hsWeiToUsdtWei(env, amountWei);
   return lpWeiToUsdtWei(env, amountWei);
 }
+
+export async function stakeAssetYieldWeiToHsWei(env: Env, asset: StakeAsset, yieldWei: bigint): Promise<bigint> {
+  if (yieldWei <= 0n) return 0n;
+  if (asset === "HS") return yieldWei;
+  if (asset === "USDT") return usdtWeiToHsWei(env, yieldWei);
+  return usdtWeiToHsWei(env, await lpWeiToUsdtWei(env, yieldWei));
+}

@@ -231,12 +231,14 @@ export async function getUserFinancialSummary(env: Env, userAddress: string): Pr
     .bind(user)
     .all<{ asset: string; amount: string; lock_months: number; monthly_rate_bps: number; matures_at: number; claimed: number }>();
   for (const row of stakeRows.results ?? []) {
-    const principal = await stakeAssetWeiToUsdtWei(env, row.asset as StakeAsset, parseWei(row.amount));
+    const amountWei = parseWei(row.amount);
+    const principal = await stakeAssetWeiToUsdtWei(env, row.asset as StakeAsset, amountWei);
     stakeDepositUsdtWei += principal;
     if (!row.claimed) stakeUsdtWei += principal;
     if (!row.claimed && row.matures_at <= now) {
-      const grossYield = (principal * BigInt(row.monthly_rate_bps) * BigInt(row.lock_months)) / 10_000n;
-      pendingUsdtWei += (grossYield * 9_500n) / 10_000n;
+      const yieldAssetWei = (amountWei * BigInt(row.monthly_rate_bps) * BigInt(row.lock_months)) / 10_000n;
+      const yieldUsdtWei = await stakeAssetWeiToUsdtWei(env, row.asset as StakeAsset, yieldAssetWei);
+      pendingUsdtWei += (yieldUsdtWei * 9_500n) / 10_000n;
     }
   }
 

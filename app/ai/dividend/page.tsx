@@ -28,6 +28,12 @@ interface DividendResponse {
   stock?: { symbol: string; name: string; priceUsdt: number; source: string; updatedAt: number | null; fallback: boolean };
   holdings: { totalStock: string; lockedStock: string };
   dividend: { date: string; stock_share: string; claimed: number };
+  airdrop?: {
+    claimPeriod: string;
+    currentMonthStart: number;
+    firstStockAt: number | null;
+    monthlyEligibleAt: number | null;
+  };
 }
 
 export default function DividendPage() {
@@ -180,7 +186,11 @@ export default function DividendPage() {
   const lockedStock = Number(formatUnits(BigInt(data.holdings.lockedStock), 18));
   const todayShare = Number(formatUnits(BigInt(data.dividend.stock_share), 18));
   const stockPrice = data.stock?.priceUsdt ?? 1;
-  const unlocked = AI_AIRDROP_MIN_DAILY_STOCK <= totalStock;
+  const enoughStock = AI_AIRDROP_MIN_DAILY_STOCK <= totalStock;
+  const monthlyEligibleAt = data.airdrop?.monthlyEligibleAt ?? null;
+  const heldOneMonth = Boolean(monthlyEligibleAt && Date.now() / 1000 >= monthlyEligibleAt);
+  const airdropReady = enoughStock && heldOneMonth;
+  const monthlyEligibleDate = monthlyEligibleAt ? new Date(monthlyEligibleAt * 1000).toLocaleDateString("zh-CN") : "—";
 
   return (
     <PageShell>
@@ -239,9 +249,13 @@ export default function DividendPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div
-            className={`rounded-xl border p-3 text-sm ${unlocked ? "border-[#00c6ff]/40 bg-[#00c6ff]/5 text-[#00c6ff]" : "border-white/10 bg-white/[0.02] text-white/40"}`}
+            className={`rounded-xl border p-3 text-sm ${airdropReady ? "border-[#00c6ff]/40 bg-[#00c6ff]/5 text-[#00c6ff]" : "border-white/10 bg-white/[0.02] text-white/40"}`}
           >
-            {unlocked ? t("ai.div.airdropOk") : t("ai.div.airdropNeed", { amount: formatNumber(AI_AIRDROP_MIN_DAILY_STOCK - totalStock, 0) })}
+            {!enoughStock
+              ? t("ai.div.airdropNeed", { amount: formatNumber(AI_AIRDROP_MIN_DAILY_STOCK - totalStock, 0) })
+              : heldOneMonth
+                ? t("ai.div.airdropOk", { period: data.airdrop?.claimPeriod ?? "—" })
+                : t("ai.div.airdropHoldNeed", { date: monthlyEligibleDate })}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-xl border border-white/5 bg-black/40 p-3">
@@ -258,7 +272,7 @@ export default function DividendPage() {
           <p className="text-[11px] text-white/30">
             {t("ai.div.weeklyHint")}
           </p>
-          <Button onClick={claimAirdrop} disabled={claimingAirdrop || !unlocked} className="w-full">
+          <Button onClick={claimAirdrop} disabled={claimingAirdrop || !airdropReady} className="w-full">
             {claimingAirdrop ? <Loader2 className="h-4 w-4 animate-spin" /> : t("ai.div.claimAirdrop")}
           </Button>
         </CardContent>
