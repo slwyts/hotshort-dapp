@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAccount, useReadContract, useWriteContract } from "wagmi";
 import { formatUnits, keccak256, parseUnits, toHex } from "viem";
 import { Loader2 } from "lucide-react";
@@ -30,6 +30,30 @@ const TIER_VISUAL: Record<AiTierKey, { mascot: string; theme: string; sub: strin
   pioneer: { mascot: "/mascots/lucky.png", theme: "#14b8a6", sub: "PIONEER", dividend: "1%" },
 };
 
+interface AiBuyResp {
+  id: string;
+  tier: AiTierKey;
+  usdtIn: string;
+  stockGranted: string;
+  stockPriceUsdt: number;
+}
+
+function stockGrantValueUsdt(usdt: number, stockGrantBps: number): number {
+  return (usdt * stockGrantBps) / BPS_DENOMINATOR;
+}
+
+function stockSharesFromWei(value: string | null | undefined): number {
+  try {
+    return Number(formatUnits(BigInt(value ?? "0"), 18));
+  } catch {
+    return 0;
+  }
+}
+
+function formatShares(value: number): string {
+  return formatNumber(value, value >= 100 ? 0 : 4);
+}
+
 export default function AiPage() {
   const { address, isConnected } = useAccount();
   const { jwt, signIn } = useSiweJwt();
@@ -39,6 +63,7 @@ export default function AiPage() {
   const { ensureBound } = useReferralGate();
   const ensureAllowance = useEnsureAllowance();
   const [pending, setPending] = useState<AiTierKey | null>(null);
+  const [stockPrice, setStockPrice] = useState<number | null>(null);
 
   const { data: usdtBal } = useReadContract({
     abi: ERC20_ABI,
@@ -48,6 +73,19 @@ export default function AiPage() {
     query: { enabled: !!address, refetchInterval: 30_000 },
   });
   const usdtNum = usdtBal ? Number(formatUnits(usdtBal as bigint, 18)) : 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .get<{ priceUsdt: number }>(endpoints.stockPrice)
+      .then((quote) => {
+        if (!cancelled && Number.isFinite(quote.priceUsdt) && quote.priceUsdt > 0) setStockPrice(quote.priceUsdt);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const buy = async (tier: AiTierKey, usdt: number) => {
     if (!isConnected || !address) {
@@ -106,7 +144,7 @@ export default function AiPage() {
         args: [usdtToken, amountWei, DEPOSIT_PURPOSE.AI_PACKAGE, ref],
       });
 
-      await api.post(
+      const order = await api.post<AiBuyResp>(
         endpoints.aiBuy,
         {
           sourceTxHash: txHash,
@@ -116,7 +154,7 @@ export default function AiPage() {
       );
 
       const tierMeta = AI_TIERS.find((x) => x.key === tier)!;
-      const stockGrant = (usdt * tierMeta.stockGrantBps) / BPS_DENOMINATOR;
+      const stockGrant = stockSharesFromWei(order.stockGranted);
       Swal.fire({
         icon: "success",
         title: t("ai.success.title"),
@@ -124,7 +162,7 @@ export default function AiPage() {
           <div style="text-align:left; line-height:1.8;">
             <p>${t("ai.success.bought", { tier: t(`ai.tier.${tierMeta.key}`) })}</p>
             ${stockGrant > 0
-              ? `<p>${t("ai.success.gift", { amount: formatNumber(stockGrant, 2) })}</p>`
+              ? `<p>${t("ai.success.gift", { amount: formatShares(stockGrant), price: formatNumber(order.stockPriceUsdt, 4) })}</p>`
               : `<p class="text-white/50 text-xs">${t("ai.success.noGift")}</p>`}
             <a href="https://bscscan.com/tx/${txHash}" target="_blank" rel="noopener" class="text-[#00c6ff] text-xs">${t("ai.success.viewTx")}</a>
           </div>`,
@@ -157,6 +195,8 @@ export default function AiPage() {
           const v = TIER_VISUAL[tier.key as AiTierKey];
           const isPending = pending === tier.key;
           const eligible = isConnected && usdtNum >= tier.usdt;
+          const stockGrantUsdt = stockGrantValueUsdt(tier.usdt, tier.stockGrantBps);
+          const estimatedShares = stockPrice && stockPrice > 0 ? stockGrantUsdt / stockPrice : null;
           return (
             <Card
               key={tier.key}
@@ -192,7 +232,13 @@ export default function AiPage() {
                     <span className="text-xs text-white/50">USDT</span>
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-[11px] text-white/50">
-                    <span>{t("ai.giftStock", { amount: (tier.usdt * tier.stockGrantBps / BPS_DENOMINATOR).toFixed(0) })}</span>
+                    <span>
+                      {stockGrantUsdt > 0 && estimatedShares !== null
+                        ? t("ai.giftStock", { amount: formatShares(estimatedShares), value: formatNumber(stockGrantUsdt, 0) })
+                        : stockGrantUsdt > 0
+                          ? t("ai.giftStockPending", { value: formatNumber(stockGrantUsdt, 0) })
+                          : t("ai.noGift")}
+                    </span>
                     <span>·</span>
                     <span>{t("ai.dailyDividend", { ratio: v.dividend })}</span>
                   </div>
