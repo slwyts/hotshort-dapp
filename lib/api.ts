@@ -81,6 +81,7 @@ export const endpoints = {
   burnRecords: "/burn/records",
   burnClaim: "/burn/claim/top10",
   burnClaimPersonal: "/burn/claim/personal",
+  burnClaimPersonalConfirm: "/burn/claim/personal/confirm",
   referralTree: "/referral/tree",
   referralBind: "/referral/bind",
   referralMe: "/referral/me",

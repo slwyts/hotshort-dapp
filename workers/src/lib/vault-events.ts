@@ -7,6 +7,9 @@ const DEPOSITED_EVENT = parseAbiItem(
 const BURNED_EVENT = parseAbiItem(
   "event Burned(address indexed user, uint256 amount, address indexed referrer)",
 );
+const CLAIMED_EVENT = parseAbiItem(
+  "event Claimed(address indexed user, address indexed token, uint256 amount, uint8 indexed reason, uint256 nonce)",
+);
 
 function sameAddress(a: string | undefined, b: string): boolean {
   return (a ?? "").toLowerCase() === b.toLowerCase();
@@ -62,4 +65,33 @@ export async function verifyVaultBurn(env: Env, expected: {
     }
   }
   throw new Error("matching Vault.Burned event not found");
+}
+
+export async function verifyVaultClaim(env: Env, expected: {
+  txHash: Hex;
+  user: Address;
+  token: Address;
+  reason: number;
+  nonce?: bigint;
+}): Promise<{ amount: bigint; nonce: bigint }> {
+  const logs = await receiptLogs(env, expected.txHash);
+  for (const log of logs) {
+    try {
+      const decoded = decodeEventLog({ abi: [CLAIMED_EVENT], data: log.data, topics: log.topics });
+      const args = decoded.args as { user?: Address; token?: Address; amount?: bigint; reason?: number; nonce?: bigint };
+      if (
+        sameAddress(args.user, expected.user) &&
+        sameAddress(args.token, expected.token) &&
+        Number(args.reason) === expected.reason &&
+        args.amount !== undefined &&
+        args.nonce !== undefined &&
+        (expected.nonce === undefined || args.nonce === expected.nonce)
+      ) {
+        return { amount: args.amount, nonce: args.nonce };
+      }
+    } catch {
+      // not a Claimed event
+    }
+  }
+  throw new Error("matching Vault.Claimed event not found");
 }

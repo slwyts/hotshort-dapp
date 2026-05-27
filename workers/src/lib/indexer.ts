@@ -57,6 +57,19 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
     )
       .bind(usedAt, log.transactionHash, nonce)
       .run();
+    if (Number(log.args.reason) === 8 && log.args.user && log.args.amount) {
+      const user = log.args.user.toLowerCase();
+      await env.DB.prepare(
+        "UPDATE burn_records SET claimed_individual = 1 WHERE user = ? AND claimed_individual = 0",
+      )
+        .bind(user)
+        .run();
+      await env.DB.prepare(
+        "UPDATE burn_personal_status SET total_personal_claimed_hs = ?, out_at = COALESCE(out_at, ?), updated_at = ? WHERE user = ?",
+      )
+        .bind(log.args.amount.toString(), usedAt, usedAt, user)
+        .run();
+    }
   }
 
   // 燃烧记录入账（P3 会基于此分配 50/20/15/5/5/5，先记原始流水）

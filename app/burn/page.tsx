@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useAccount, useWriteContract } from "wagmi";
+import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import { formatUnits, parseUnits } from "viem";
 import { Loader2, Flame, Trophy, Send, Award } from "lucide-react";
 import Swal from "sweetalert2";
@@ -35,6 +35,11 @@ interface BurnMe {
   promotionActivationUsdt?: string;
   top10PendingHs: string;
   eligibleAirdrop: boolean;
+  airdrop?: {
+    hotshortAccount: string;
+    status: "pending" | "sent" | "rejected";
+    submittedAt: number;
+  } | null;
 }
 
 interface Leaderboard {
@@ -77,6 +82,7 @@ function weiToNumber(value: string | number | bigint | null | undefined): number
 export default function BurnPage() {
   const { address, isConnected } = useAccount();
   const { jwt, signIn } = useSiweJwt();
+  const publicClient = usePublicClient();
   const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
   const { vault, hsToken } = useContracts();
@@ -115,6 +121,13 @@ export default function BurnPage() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const waitForSuccessfulTx = useCallback(async (hash: `0x${string}`) => {
+    if (!publicClient) throw new Error(t("common.rpcUnavailable"));
+    Swal.fire({ title: t("common.waitingOnChain"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") throw new Error(t("common.txFailedOnChain"));
+  }, [publicClient, t]);
 
   const burn = async () => {
     if (!isConnected || !address) {
@@ -202,6 +215,7 @@ export default function BurnPage() {
           sig.signature as `0x${string}`,
         ],
       });
+      await waitForSuccessfulTx(txHash);
       await Swal.fire({
         icon: "success",
         title: t("burn.claim.success.title"),
@@ -237,7 +251,7 @@ export default function BurnPage() {
         return;
       }
       Swal.fire({ title: t("burn.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
-      await writeContractAsync({
+      const txHash = await writeContractAsync({
         address: vault,
         abi: VAULT_ABI,
         functionName: "claim",
@@ -251,10 +265,13 @@ export default function BurnPage() {
           sig.signature as `0x${string}`,
         ],
       });
+      await waitForSuccessfulTx(txHash);
+      await api.post(endpoints.burnClaimPersonalConfirm, { txHash, nonce: sig.nonce }, token);
       await Swal.fire({
         icon: "success",
         title: t("burn.personalClaim.success.title"),
-        html: t("burn.personalClaim.success.body", { amount: formatNumber(Number(formatUnits(BigInt(sig.amount), 18)), 2) }),
+        html: `${t("burn.personalClaim.success.body", { amount: formatNumber(Number(formatUnits(BigInt(sig.amount), 18)), 2) })}<br/>
+               <a href="https://bscscan.com/tx/${txHash}" target="_blank" class="text-[#00c6ff] text-xs">${shortenAddress(txHash)}</a>`,
         background: "#141419",
         color: "#fff",
         confirmButtonColor: "#b829ff",
@@ -281,6 +298,7 @@ export default function BurnPage() {
         confirmButtonColor: "#b829ff",
       });
       setHotshortAccount("");
+      await refresh();
     } catch (e) {
       await Swal.fire({ icon: "error", title: t("error.title"), text: (e as Error).message, background: "#141419", color: "#fff" });
     } finally {
@@ -296,6 +314,8 @@ export default function BurnPage() {
   const currentWeeklyBurn = weiToNumber(round?.current?.totalBurnHs);
   const currentTop10Pool = weiToNumber(round?.current?.top10PoolHs);
   const promotionActive = Boolean(me?.promotionActive || totalBurnUsdt >= BURN_PROMOTION_ACTIVATE_USDT);
+  const airdropStatus = me?.airdrop?.status ?? "none";
+  const canSubmitAirdrop = airdropStatus === "none" || airdropStatus === "rejected";
 
   return (
     <PageShell>
@@ -454,16 +474,41 @@ export default function BurnPage() {
               {t("burn.airdropDesc", { min: BURN_AIRDROP_MIN_USDT, usdt: formatNumber(totalBurnUsdt, 2) })}
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex gap-2">
-            <Input
-              placeholder={t("burn.airdropPlaceholder")}
-              value={hotshortAccount}
-              onChange={(e) => setHotshortAccount(e.target.value)}
-              className="flex-1"
-            />
-            <Button onClick={submitAirdrop} disabled={submittingAirdrop || !hotshortAccount.trim()}>
-              {submittingAirdrop ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </Button>
+          <CardContent className="space-y-3">
+            {!canSubmitAirdrop && me.airdrop ? (
+              <div className={cn(
+                "rounded-md border px-3 py-2 text-sm leading-relaxed",
+                airdropStatus === "sent"
+                  ? "border-green-400/25 bg-green-400/10 text-green-100"
+                  : "border-[#00c6ff]/25 bg-[#00c6ff]/10 text-[#8fe7ff]",
+              )}>
+                <div className="font-bold">
+                  {t(airdropStatus === "sent" ? "burn.airdrop.status.sent" : "burn.airdrop.status.pending")}
+                </div>
+                <div className="mt-1 text-xs opacity-80">
+                  {t("burn.airdrop.account", { account: me.airdrop.hotshortAccount })}
+                </div>
+              </div>
+            ) : (
+              <>
+                {airdropStatus === "rejected" && (
+                  <div className="rounded-md border border-red-400/25 bg-red-400/10 px-3 py-2 text-xs text-red-100">
+                    {t("burn.airdrop.status.rejected")}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Input
+                    placeholder={t("burn.airdropPlaceholder")}
+                    value={hotshortAccount}
+                    onChange={(e) => setHotshortAccount(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button onClick={submitAirdrop} disabled={submittingAirdrop || !hotshortAccount.trim()}>
+                    {submittingAirdrop ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
       )}

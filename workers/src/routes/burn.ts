@@ -7,7 +7,8 @@ import { ulid } from "../lib/ulid";
 import { nowSeconds } from "../lib/time";
 import { createClaimSignature } from "../lib/claims";
 import { markRewardRowsClaimed, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
-import { verifyVaultBurn } from "../lib/vault-events";
+import { readTokenBalance } from "../lib/token-balance";
+import { verifyVaultBurn, verifyVaultClaim } from "../lib/vault-events";
 import { hsWeiToUsdtWei } from "../lib/pricing";
 import {
   BURN_ALLOCATION_BPS,
@@ -56,6 +57,20 @@ async function hasClaimedPersonalBurn(env: Env, user: string): Promise<boolean> 
     .bind(user.toLowerCase())
     .first<{ id: string }>();
   return !!row;
+}
+
+async function markPersonalBurnClaimed(env: Env, user: string, amount: bigint, claimedAt: number): Promise<void> {
+  const normalizedUser = user.toLowerCase();
+  await env.DB.prepare(
+    "UPDATE burn_records SET claimed_individual = 1 WHERE user = ? AND claimed_individual = 0",
+  )
+    .bind(normalizedUser)
+    .run();
+  await env.DB.prepare(
+    "UPDATE burn_personal_status SET total_personal_claimed_hs = ?, out_at = COALESCE(out_at, ?), updated_at = ? WHERE user = ?",
+  )
+    .bind(amount.toString(), claimedAt, claimedAt, normalizedUser)
+    .run();
 }
 
 /** GET /burn/me  个人状态 + 当周可领总额 */
@@ -110,6 +125,12 @@ burn.get("/me", async (c) => {
     referralReward += amount;
   }
 
+  const airdrop = await c.env.DB.prepare(
+    "SELECT hotshort_account, status, submitted_at FROM airdrop_list WHERE user = ? ORDER BY submitted_at DESC LIMIT 1",
+  )
+    .bind(user)
+    .first<{ hotshort_account: string; status: "pending" | "sent" | "rejected"; submitted_at: number }>();
+
   return c.json({
     totalBurnedHs: status.total.toString(),
     totalBurnedUsdt: totalBurnedUsdt.toString(),
@@ -128,6 +149,13 @@ burn.get("/me", async (c) => {
       aiHs: aiReward.toString(),
     },
     eligibleAirdrop: totalBurnedUsdt >= BigInt(BURN_AIRDROP_MIN_USDT) * 10n ** 18n,
+    airdrop: airdrop
+      ? {
+        hotshortAccount: airdrop.hotshort_account,
+        status: airdrop.status,
+        submittedAt: airdrop.submitted_at,
+      }
+      : null,
   });
 });
 
@@ -330,28 +358,75 @@ burn.post("/claim/personal", async (c) => {
     return c.json({ amount: "0", error: "personal burn already claimed" }, 400);
   }
 
-  const amount = status.total * 2n;
   const now = await nowSeconds(c.env);
+  const pending = await c.env.DB.prepare(
+    `SELECT nonce, token, amount, reason, deadline, signature
+       FROM claim_signatures
+      WHERE user = ? AND reason = 8 AND used_at IS NULL AND deadline > ?
+      ORDER BY created_at DESC LIMIT 1`,
+  )
+    .bind(user, now)
+    .first<{ nonce: string; token: string; amount: string; reason: number; deadline: number; signature: Hex }>();
+
+  const amount = BigInt(pending?.amount ?? status.total * 2n);
+  const token = c.env.HS_TOKEN.toLowerCase() as Address;
+  const vaultBalance = await readTokenBalance(c.env, token, c.env.VAULT_ADDRESS.toLowerCase() as Address).catch(() => null);
+  if (vaultBalance === null) return c.json({ error: "vault balance unavailable" }, 503);
+  if (vaultBalance < amount) return c.json({ error: "insufficient vault HS balance" }, 503);
+
+  if (pending) {
+    return c.json({
+      token: pending.token,
+      recipients: [user as Address],
+      amounts: [pending.amount],
+      amount: pending.amount,
+      nonce: pending.nonce,
+      deadline: pending.deadline,
+      reason: pending.reason,
+      signature: pending.signature,
+      personalClaimedHs: pending.amount,
+      pending: true,
+    });
+  }
+
   const claim = await createClaimSignature(c.env, {
     user: user as Address,
-    token: c.env.HS_TOKEN.toLowerCase() as Address,
+    token,
     payouts: [{ recipient: user as Address, amount }],
     reason: 8,
     now,
   });
 
-  await c.env.DB.prepare(
-    "UPDATE burn_records SET claimed_individual = 1 WHERE user = ? AND claimed_individual = 0",
-  )
-    .bind(user)
-    .run();
-  await c.env.DB.prepare(
-    "UPDATE burn_personal_status SET total_personal_claimed_hs = ?, out_at = COALESCE(out_at, ?), updated_at = ? WHERE user = ?",
-  )
-    .bind(amount.toString(), now, now, user)
-    .run();
-
   return c.json({ ...claim, personalClaimedHs: amount.toString() });
+});
+
+/**
+ * POST /burn/claim/personal/confirm  前端交易成功后即时回调，cron 索引器只做兜底。
+ */
+burn.post("/claim/personal/confirm", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  const body = (await c.req.json().catch(() => ({}))) as { txHash?: string; nonce?: string };
+  if (!body.txHash || !/^0x[a-fA-F0-9]{64}$/.test(body.txHash)) return c.json({ error: "bad tx hash" }, 400);
+  const expectedNonce = body.nonce && /^\d+$/.test(body.nonce) ? BigInt(body.nonce) : undefined;
+
+  const verified = await verifyVaultClaim(c.env, {
+    txHash: body.txHash as Hex,
+    user: user as Address,
+    token: c.env.HS_TOKEN.toLowerCase() as Address,
+    reason: 8,
+    nonce: expectedNonce,
+  });
+
+  const now = await nowSeconds(c.env);
+  await c.env.DB.prepare(
+    "UPDATE claim_signatures SET used_at = ? WHERE nonce = ? AND user = ? AND reason = 8 AND used_at IS NULL",
+  )
+    .bind(now, verified.nonce.toString(), user)
+    .run();
+  await markPersonalBurnClaimed(c.env, user, verified.amount, now);
+
+  return c.json({ confirmed: true, amount: verified.amount.toString(), nonce: verified.nonce.toString() });
 });
 
 /**

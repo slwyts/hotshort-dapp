@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useAccount, useWriteContract } from "wagmi";
+import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import { formatUnits } from "viem";
 import { Award, CheckCircle, ChevronDown, Clock, Coins, Flame, Loader2, Sparkles, Ticket } from "lucide-react";
 import Swal from "sweetalert2";
@@ -149,6 +149,7 @@ export function OrdersSection() {
   const router = useRouter();
   const pathname = usePathname();
   const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
   const { vault } = useContracts();
   const activeType = (ORDER_TYPES.some((item) => item.key === search.get("type")) ? search.get("type") : "stake") as OrderType;
 
@@ -206,7 +207,8 @@ export function OrdersSection() {
     if (!sig.signature || !sig.token || !sig.recipients || !sig.amounts || !sig.nonce || !sig.deadline || sig.reason === undefined) {
       return null;
     }
-    return writeContractAsync({
+    if (!publicClient) throw new Error(t("common.rpcUnavailable"));
+    const txHash = await writeContractAsync({
       address: vault,
       abi: VAULT_ABI,
       functionName: "claim",
@@ -220,6 +222,10 @@ export function OrdersSection() {
         sig.signature as `0x${string}`,
       ],
     });
+    Swal.fire({ title: t("common.waitingOnChain"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+    if (receipt.status !== "success") throw new Error(t("common.txFailedOnChain"));
+    return txHash;
   };
 
   const claimStake = async (orderId: string) => {
@@ -313,6 +319,7 @@ export function OrdersSection() {
       const sig = await api.post<ClaimSig>(endpoints.burnClaimPersonal, {}, token);
       Swal.fire({ title: t("burn.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const txHash = await sendVaultClaim(sig);
+      await api.post(endpoints.burnClaimPersonalConfirm, { txHash, nonce: sig.nonce }, token);
       await Swal.fire({
         icon: "success",
         title: t("burn.personalClaim.success.title"),
