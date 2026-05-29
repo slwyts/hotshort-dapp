@@ -333,11 +333,41 @@ ai.get("/dividend/today", async (c) => {
   const firstStockAt = await firstStockAcquiredAt(c.env, user);
   const now = await nowSeconds(c.env);
   const { previousMonth, currentMonthStart } = monthlyAirdropPeriod(now);
+
+  const pendingDivs = await c.env.DB.prepare(
+    "SELECT stock_share FROM ai_dividend_user_daily WHERE user = ? AND claimed = 0",
+  )
+    .bind(user)
+    .all<{ stock_share: string }>();
+  const pendingTeamRewards = await c.env.DB.prepare(
+    "SELECT reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0 AND reward_token = 'STOCK' AND kind IN ('gen1', 'gen2', 'gen3')",
+  )
+    .bind(user)
+    .all<{ reward_amount: string }>();
+  const pendingOtherStockRewards = await c.env.DB.prepare(
+    "SELECT reward_amount FROM reward_claims WHERE user = ? AND claimed = 0 AND reward_token = 'STOCK'",
+  )
+    .bind(user)
+    .all<{ reward_amount: string }>();
+
+  let personalStock = 0n;
+  for (const row of pendingDivs.results ?? []) personalStock += BigInt(row.stock_share);
+  let teamStock = 0n;
+  for (const row of pendingTeamRewards.results ?? []) teamStock += BigInt(row.reward_amount);
+  let otherStock = 0n;
+  for (const row of pendingOtherStockRewards.results ?? []) otherStock += BigInt(row.reward_amount);
+
   return c.json({
     today,
     stock,
     holdings: { totalStock: h.total.toString(), lockedStock: h.locked.toString() },
     dividend: div ?? { date: today, stock_share: "0", claimed: 0 },
+    claimable: {
+      personalStock: personalStock.toString(),
+      teamStock: teamStock.toString(),
+      otherStock: otherStock.toString(),
+      totalStock: (personalStock + teamStock + otherStock).toString(),
+    },
     airdrop: {
       claimPeriod: previousMonth,
       currentMonthStart,

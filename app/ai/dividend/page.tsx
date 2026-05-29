@@ -28,6 +28,7 @@ interface DividendResponse {
   stock?: { symbol: string; name: string; priceUsdt: number; source: string; updatedAt: number | null; fallback: boolean };
   holdings: { totalStock: string; lockedStock: string };
   dividend: { date: string; stock_share: string; claimed: number };
+  claimable?: { personalStock: string; teamStock: string; otherStock: string; totalStock: string };
   airdrop?: {
     claimPeriod: string;
     currentMonthStart: number;
@@ -185,6 +186,10 @@ export default function DividendPage() {
   const totalStock = Number(formatUnits(BigInt(data.holdings.totalStock), 18));
   const lockedStock = Number(formatUnits(BigInt(data.holdings.lockedStock), 18));
   const todayShare = Number(formatUnits(BigInt(data.dividend.stock_share), 18));
+  const personalClaimableStock = Number(formatUnits(BigInt(data.claimable?.personalStock ?? "0"), 18));
+  const teamClaimableStock = Number(formatUnits(BigInt(data.claimable?.teamStock ?? "0"), 18));
+  const otherClaimableStock = Number(formatUnits(BigInt(data.claimable?.otherStock ?? "0"), 18));
+  const totalClaimableStock = Number(formatUnits(BigInt(data.claimable?.totalStock ?? (data.dividend.claimed ? "0" : data.dividend.stock_share)), 18));
   const stockPrice = data.stock?.priceUsdt ?? 1;
   const enoughStock = AI_AIRDROP_MIN_DAILY_STOCK <= totalStock;
   const monthlyEligibleAt = data.airdrop?.monthlyEligibleAt ?? null;
@@ -217,9 +222,22 @@ export default function DividendPage() {
               suffix={`${data.dividend.claimed ? t("ai.div.claimed") : ""} ≈ $${formatNumber(todayShare * stockPrice, 2)}`}
             />
             <Stat
-              label={t("ai.div.pending")}
-              value={data.dividend.claimed ? "0" : formatNumber(todayShare, 2)}
+              label={t("ai.div.teamReward")}
+              value={formatNumber(teamClaimableStock, 2)}
               unit="WTO"
+              suffix={`≈ $${formatNumber(teamClaimableStock * stockPrice, 2)}`}
+            />
+            <Stat
+              label={t("ai.div.personalPending")}
+              value={formatNumber(personalClaimableStock, 2)}
+              unit="WTO"
+              suffix={`≈ $${formatNumber(personalClaimableStock * stockPrice, 2)}`}
+            />
+            <Stat
+              label={t("ai.div.pending")}
+              value={formatNumber(totalClaimableStock, 2)}
+              unit="WTO"
+              suffix={`${otherClaimableStock > 0 ? t("ai.div.otherIncluded", { amount: formatNumber(otherClaimableStock, 2) }) : ""} ≈ $${formatNumber(totalClaimableStock * stockPrice, 2)}`}
             />
           </div>
 
@@ -229,7 +247,7 @@ export default function DividendPage() {
 
           <Button
             onClick={claim}
-            disabled={claiming || (todayShare === 0 && data.dividend.claimed === 1)}
+            disabled={claiming || totalClaimableStock <= 0}
             size="lg"
             className="w-full"
           >
