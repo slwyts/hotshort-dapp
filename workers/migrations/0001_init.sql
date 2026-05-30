@@ -351,4 +351,8 @@ INSERT OR IGNORE INTO admin_config (key, value, updated_by, updated_at) VALUES
   ('lottery_weekly_refill_hs', '100000', 'init', strftime('%s','now')),
   ('lottery_current_round', '1', 'init', strftime('%s','now')),
   ('burn_current_round', '1', 'init', strftime('%s','now')),
+  ('lp_dividend_amount_hs', '100000', 'init', strftime('%s','now')),
+  ('lp_dividend_interval_seconds', '604800', 'init', strftime('%s','now')),
+  ('lp_dividend_last_at', '0', 'init', strftime('%s','now')),
+  ('lp_dividend_round', '0', 'init', strftime('%s','now')),
   ('pancake_lottery_address', '', 'init', strftime('%s','now'));

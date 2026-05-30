@@ -5,6 +5,7 @@ import { releaseDueAiStock } from "./lib/ai-releases";
 import { syncStockQuote } from "./lib/stocks";
 import { drawLottery } from "./lib/lottery-draw";
 import { settleBurnRound } from "./lib/burn-settle";
+import { distributeLpDividend } from "./lib/lp-dividend";
 
 /**
  * Cron 入口路由，由 wrangler.toml 中的三条 schedule 触发。
@@ -20,6 +21,13 @@ export async function runCron(event: ScheduledEvent, env: Env): Promise<void> {
   if (cron === "* * * * *" || cron === "*/1 * * * *") {
     const r = await syncVaultEvents(env);
     console.log(`[cron] indexer ${r.from}-${r.to}, ${r.count} logs`);
+    // LP 分红每分钟检查是否到期
+    try {
+      const lp = await distributeLpDividend(env);
+      if (!lp.skipped) console.log(`[cron] lp-dividend round=${lp.round} ${lp.recipients} recipients`);
+    } catch (e) {
+      console.error(`[cron] lp-dividend error`, (e as Error).message);
+    }
     return;
   }
   if (cron === "*/15 * * * *") {

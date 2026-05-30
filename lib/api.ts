@@ -104,6 +104,8 @@ export const endpoints = {
   adminAiConfig: "/admin/ai-config",
   adminTimeDebug: "/admin/time-debug",
   adminResetDb: "/admin/reset-db",
+  adminLpDividend: "/admin/lp-dividend",
+  adminLpDividendTrigger: "/admin/lp-dividend/trigger",
   agentMe: "/agent/me",
   agentSummary: "/agent/summary",
   agentUsers: "/agent/users",

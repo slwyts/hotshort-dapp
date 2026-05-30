@@ -10,6 +10,7 @@ import { ensureAgentTables, listAgentAlerts, listAgentUsers, normalizeAddress } 
 import { directReferralConfigKey } from "../lib/referral";
 import { importGenesisNode, normalizeAiTier } from "../lib/genesis-nodes";
 import { getTimeDebugInfo, realNowSeconds, setTimeOffset, todayBeijing, nowSeconds } from "../lib/time";
+import { distributeLpDividend } from "../lib/lp-dividend";
 import {
   AI_REFERRAL_DIRECT_BPS,
   AI_TIERS,
@@ -470,6 +471,10 @@ async function seedDefaults(env: Env, at: number): Promise<void> {
     ["lottery_weekly_refill_hs", "100000"],
     ["lottery_current_round", "1"],
     ["burn_current_round", "1"],
+    ["lp_dividend_amount_hs", "100000"],
+    ["lp_dividend_interval_seconds", "604800"],
+    ["lp_dividend_last_at", "0"],
+    ["lp_dividend_round", "0"],
     ["pancake_lottery_address", ""],
     ["indexer_last_block", "0"], // 下面会用最新区块覆盖
   ];
@@ -539,4 +544,67 @@ admin.post("/reset-db", async (c) => {
     cursorBlock: latestBlock,
     nowSeconds: at,
   });
+});
+
+// ===== LP 交易分红管理 =====
+
+/** GET /admin/lp-dividend  当前 LP 分红配置 */
+admin.get("/lp-dividend", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  const keys = ["lp_dividend_amount_hs", "lp_dividend_interval_seconds", "lp_dividend_last_at", "lp_dividend_round"];
+  const rs = await c.env.DB.prepare(
+    `SELECT key, value FROM admin_config WHERE key IN (${keys.map(() => "?").join(",")})`,
+  )
+    .bind(...keys)
+    .all<{ key: string; value: string }>();
+  const map = new Map<string, string>();
+  for (const r of rs.results ?? []) map.set(r.key, r.value);
+
+  const amountHs = map.get("lp_dividend_amount_hs") ?? "100000";
+  const intervalSeconds = Number(map.get("lp_dividend_interval_seconds") ?? "604800");
+  const lastAt = Number(map.get("lp_dividend_last_at") ?? "0");
+  const round = Number(map.get("lp_dividend_round") ?? "0");
+
+  let nextAt = 0;
+  if (intervalSeconds > 0) {
+    nextAt = (lastAt > 0 ? lastAt : realNowSeconds()) + intervalSeconds;
+  }
+
+  return c.json({ amountHs, intervalSeconds, lastAt, round, nextAt });
+});
+
+/** POST /admin/lp-dividend  设置 LP 分红配置 */
+admin.post("/lp-dividend", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  const body = (await c.req.json().catch(() => ({}))) as {
+    amountHs?: number;
+    intervalSeconds?: number;
+  };
+  const now = realNowSeconds();
+  const updates: [string, string][] = [];
+  if (typeof body.amountHs === "number" && body.amountHs > 0) updates.push(["lp_dividend_amount_hs", String(body.amountHs)]);
+  if (typeof body.intervalSeconds === "number" && body.intervalSeconds >= 60) updates.push(["lp_dividend_interval_seconds", String(Math.floor(body.intervalSeconds))]);
+  if (updates.length === 0) return c.json({ error: "bad payload" }, 400);
+  for (const [k, v] of updates) {
+    await c.env.DB.prepare(
+      "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES (?, ?, ?, ?)",
+    )
+      .bind(k, v, owner, now)
+      .run();
+  }
+  return c.json({ saved: true });
+});
+
+/** POST /admin/lp-dividend/trigger  立即手动分发一次 */
+admin.post("/lp-dividend/trigger", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  try {
+    const r = await distributeLpDividend(c.env);
+    return c.json(r);
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 500);
+  }
 });

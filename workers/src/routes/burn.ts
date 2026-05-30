@@ -99,19 +99,21 @@ burn.get("/me", async (c) => {
   const rewardRows = await c.env.DB.prepare(
     `SELECT kind, reward_amount FROM reward_claims
       WHERE user = ? AND claimed = 0 AND reward_token = 'HS'
-        AND kind IN ('burn-weight', 'stake-burn-dividend', 'ai-burn-airdrop')`,
+        AND kind IN ('burn-weight', 'stake-burn-dividend', 'ai-burn-airdrop', 'lp-dividend-weight', 'lp-dividend-top10')`,
   )
     .bind(user)
     .all<{ kind: string; reward_amount: string }>();
   let weightReward = 0n;
   let stakeReward = 0n;
   let aiReward = 0n;
+  let lpDividendReward = 0n;
   for (const row of rewardRows.results ?? []) {
     const amount = BigInt(row.reward_amount);
     top10Pending += amount;
     if (row.kind === "burn-weight") weightReward += amount;
     else if (row.kind === "stake-burn-dividend") stakeReward += amount;
     else if (row.kind === "ai-burn-airdrop") aiReward += amount;
+    else if (row.kind === "lp-dividend-weight" || row.kind === "lp-dividend-top10") lpDividendReward += amount;
   }
 
   const referralRows = await c.env.DB.prepare(
@@ -148,6 +150,7 @@ burn.get("/me", async (c) => {
       promotionHs: referralReward.toString(),
       stakeHs: stakeReward.toString(),
       aiHs: aiReward.toString(),
+      lpDividendHs: lpDividendReward.toString(),
     },
     eligibleAirdrop: totalBurnedUsdt >= BigInt(BURN_AIRDROP_MIN_USDT) * 10n ** 18n,
     airdrop: airdrop
@@ -304,7 +307,7 @@ burn.post("/claim/top10", async (c) => {
     `SELECT id, user, kind, reward_token, reward_amount, round, source_ref
        FROM reward_claims
       WHERE user = ? AND claimed = 0 AND reward_token = 'HS'
-        AND kind IN (${out ? "'burn-weight'" : "'burn-weight', 'stake-burn-dividend', 'ai-burn-airdrop'"})`,
+        AND kind IN (${out ? "'burn-weight'" : "'burn-weight', 'stake-burn-dividend', 'ai-burn-airdrop', 'lp-dividend-weight', 'lp-dividend-top10'"})`,
   )
     .bind(user)
     .all<RewardClaimRow>();
