@@ -195,9 +195,26 @@ export default function AdminFundsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Vault 余额</CardTitle>
-              <p className="text-xs text-white/40 font-mono">
-                {vaultDeployed ? shortenAddress(vault, 8) : "合约未部署"}
-              </p>
+              <div className="mt-2 rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3">
+                <p className="text-xs font-bold text-yellow-400 flex items-center gap-1">
+                  <AlertTriangle className="h-3.5 w-3.5" /> DApp 合约地址
+                </p>
+                <p className="mt-1 font-mono text-sm text-white/80 break-all select-all">
+                  {vaultDeployed ? vault : "合约未部署"}
+                </p>
+                <p className="mt-1 text-[11px] text-yellow-400/70">
+                  请向此地址转入 HS 代币以补充 Vault 资金池，用于支付用户质押赎回等支出。
+                </p>
+                {vaultDeployed && (
+                  <button
+                    type="button"
+                    className="mt-2 text-[11px] text-[#00c6ff] hover:underline"
+                    onClick={() => { void navigator.clipboard.writeText(vault); }}
+                  >
+                    复制地址
+                  </button>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <BalanceRow label="USDT" value={formatNumber(usdtNum, 2)} action={() => withdraw(usdtToken, "USDT")} />

@@ -102,13 +102,10 @@ stake.post("/orders", async (c) => {
 });
 
 /**
- * POST /stake/claim  到期领取签名。
+ * POST /stake/claim  到期领取签名（本金+收益一并折 HS 发放）。
  * 入参: { orderId }
- * 出参: 两份 EIP-712 签名 —— 一份发用户，一份直接打入 0xdEaD 销毁 5% HS 燃料。
- *   注意：合约只支持单签名 claim，所以 5% 销毁这一步走 admin signer 单独打到 0xdEaD（withdrawTo）。
- *   为保持架构对称，这里只签 95% 的用户领取签名；销毁 5% HS 由 cron 或 admin 手动触发。
- *   - 收益币种 = HS（按 README §1.1 "到期收益以 HS 发放"）
- *   - 收益金额先按质押资产本位计算，再折算为 HS 发放
+ * 出参: EIP-712 签名，payouts 包含用户实收（本金折 HS + 收益折 HS - 5% 燃料）
+ *       和 0xdEaD 销毁的燃料部分，一次交易完成。
  */
 stake.post("/claim", async (c) => {
   const user = await requireUser(c);
@@ -139,17 +136,24 @@ stake.post("/claim", async (c) => {
     return c.json({ error: "not matured" }, 400);
   }
 
-  // 质押金本位收益 = 本金数量 * monthly_rate * months
   const principal = BigInt(order.amount);
+
+  // 收益（本位）= 本金 × 月利率 × 月数
   const yieldAsset =
     (principal * BigInt(order.monthly_rate_bps) * BigInt(order.lock_months)) /
     BigInt(BPS_DENOMINATOR);
+
+  // 收益折 HS
   const yieldHs = await stakeAssetYieldWeiToHsWei(c.env, order.asset as StakeAsset, yieldAsset);
   if (yieldHs <= 0n) return c.json({ error: "yield unavailable" }, 503);
 
-  // 5% 燃料由 Worker 签名绑定到 payouts，Vault 只验证列表 hash 并一次交易转完。
+  // 本金折 HS
+  const principalHs = await stakeAssetYieldWeiToHsWei(c.env, order.asset as StakeAsset, principal);
+  if (principalHs <= 0n) return c.json({ error: "principal price unavailable" }, 503);
+
+  // 5% 燃料仅对收益部分扣
   const fuelHs = (yieldHs * BigInt(STAKE_FUEL_BURN_BPS)) / BigInt(BPS_DENOMINATOR);
-  const userHs = yieldHs - fuelHs;
+  const userHs = principalHs + yieldHs - fuelHs;
 
   const hsToken = c.env.HS_TOKEN.toLowerCase() as Address;
   const reason = 1; // STAKE_YIELD
@@ -176,6 +180,8 @@ stake.post("/claim", async (c) => {
     ...claim,
     claimableHs: userHs.toString(),
     fuelBurnHs: fuelHs.toString(),
+    yieldHs: yieldHs.toString(),
+    principalHs: principalHs.toString(),
     yieldAssetAmount: yieldAsset.toString(),
     yieldAsset: order.asset,
   });

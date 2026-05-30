@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Loader2, Wrench, Clock, Database } from "lucide-react";
+import { Loader2, Wrench, Clock, Database, ChevronUp, ChevronDown, Target } from "lucide-react";
 import Swal from "sweetalert2";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,10 +48,15 @@ export default function AdvancedDebugPage() {
   const [loading, setLoading] = useState(false);
   const [setting, setSetting] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [customOffsetVal, setCustomOffsetVal] = useState("");
-  const [customOffsetUnit, setCustomOffsetUnit] = useState<OffsetUnitKey>("sec");
 
-  // 测试模式下完全禁用时间控件
+  // 时间加减（相对偏移）
+  const [advanceVal, setAdvanceVal] = useState("");
+  const [advanceUnit, setAdvanceUnit] = useState<OffsetUnitKey>("day");
+
+  // 直接设定偏移（绝对）
+  const [directVal, setDirectVal] = useState("");
+  const [directUnit, setDirectUnit] = useState<OffsetUnitKey>("sec");
+
   const timeLocked = info?.testMode === true;
 
   const refresh = useCallback(async () => {
@@ -72,7 +77,8 @@ export default function AdvancedDebugPage() {
     void refresh();
   }, [refresh]);
 
-  const applyOffset = async (seconds: number) => {
+  /** 设置绝对偏移 */
+  const setAbsoluteOffset = async (seconds: number) => {
     const token = jwt ?? (await signIn());
     if (!token) return;
     setSetting(true);
@@ -92,8 +98,10 @@ export default function AdvancedDebugPage() {
     }
   };
 
-  /** 带二次确认 + 3s 倒计时的偏移应用 */
-  const applyWithConfirm = async (seconds: number, label: string) => {
+  /** 相对偏移：在当前偏移基础上加减 */
+  const advanceOffset = async (deltaSeconds: number, label: string) => {
+    if (!info) return;
+    const newOffset = info.offsetSeconds + deltaSeconds;
     const token = jwt ?? (await signIn());
     if (!token) return;
     const result = await Swal.fire({
@@ -127,25 +135,66 @@ export default function AdvancedDebugPage() {
       },
     });
     if (!result.isConfirmed) return;
-    void applyOffset(seconds);
+    void setAbsoluteOffset(newOffset);
   };
 
-  const handleCustomOffset = () => {
-    const val = Number(customOffsetVal);
+  const handleAdvance = () => {
+    const val = Number(advanceVal);
     if (!Number.isFinite(val) || val <= 0) return;
-    const unit = OFFSET_UNITS.find((u) => u.key === customOffsetUnit)!;
+    const unit = OFFSET_UNITS.find((u) => u.key === advanceUnit)!;
     const totalSec = val * unit.mul;
-    const locale = (typeof navigator !== "undefined" ? navigator.language : "zh-CN").startsWith("zh") ? "zh" : "en";
-    const unitLabel = locale === "zh" ? unit.labelZh : unit.labelEn;
-    setCustomOffsetVal("");
-    void applyWithConfirm(totalSec, `${val} ${unitLabel}`);
+    const isZh = (typeof navigator !== "undefined" ? navigator.language : "zh-CN").startsWith("zh");
+    const unitLabel = isZh ? unit.labelZh : unit.labelEn;
+    setAdvanceVal("");
+    void advanceOffset(totalSec, `+${val} ${unitLabel}`);
+  };
+
+  const handleDirectSet = () => {
+    const val = Number(directVal);
+    if (!Number.isFinite(val) || val < 0) return;
+    const unit = OFFSET_UNITS.find((u) => u.key === directUnit)!;
+    const totalSec = val * unit.mul;
+    const isZh = (typeof navigator !== "undefined" ? navigator.language : "zh-CN").startsWith("zh");
+    const unitLabel = isZh ? unit.labelZh : unit.labelEn;
+    setDirectVal("");
+    // 直接设定也需要确认
+    Swal.fire({
+      icon: "question",
+      title: t("debug.timeConfirm"),
+      html: t("debug.directSetConfirmBody", { offset: `${val} ${unitLabel}（${totalSec} 秒）` }),
+      background: "#141419",
+      color: "#fff",
+      showCancelButton: true,
+      confirmButtonText: t("common.confirm"),
+      cancelButtonText: t("common.cancel"),
+      confirmButtonColor: "#f59e0b",
+      cancelButtonColor: "#374151",
+      didOpen: () => {
+        const confirmBtn = Swal.getConfirmButton();
+        if (!confirmBtn) return;
+        confirmBtn.disabled = true;
+        let sec = 3;
+        confirmBtn.textContent = `${t("common.confirm")} (${sec}s)`;
+        const timer = setInterval(() => {
+          sec--;
+          if (sec <= 0) {
+            clearInterval(timer);
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = t("common.confirm");
+          } else {
+            confirmBtn.textContent = `${t("common.confirm")} (${sec}s)`;
+          }
+        }, 1000);
+      },
+    }).then((result) => {
+      if (result.isConfirmed) void setAbsoluteOffset(totalSec);
+    });
   };
 
   const handleResetDb = async () => {
     const token = jwt ?? (await signIn());
     if (!token) return;
 
-    // 二次确认弹窗：确认按钮先禁用 3 秒
     const result = await Swal.fire({
       icon: "warning",
       title: t("debug.resetConfirm"),
@@ -229,11 +278,11 @@ export default function AdvancedDebugPage() {
           </div>
         ) : (
           <div className="mt-8 grid gap-6 lg:grid-cols-2">
-            {/* 时间调试 */}
+            {/* ==================== 时间加减（相对偏移） ==================== */}
             <Card className={`border-[#f59e0b]/30 ${timeLocked ? "opacity-60" : ""}`}>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
-                  <Clock className="h-5 w-5 text-[#f59e0b]" />
+                  <ChevronUp className="h-5 w-5 text-[#f59e0b]" />
                   {t("debug.timeSection")}
                 </CardTitle>
                 {timeLocked && (
@@ -243,6 +292,7 @@ export default function AdvancedDebugPage() {
                 )}
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* 时间显示 */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-xl border border-white/5 bg-black/40 p-3">
                     <div className="text-[10px] uppercase tracking-widest text-white/40">
@@ -264,6 +314,7 @@ export default function AdvancedDebugPage() {
                   </div>
                 </div>
 
+                {/* 当前偏移 */}
                 <div className="rounded-xl border border-white/5 bg-black/40 p-3">
                   <span className="text-[10px] uppercase tracking-widest text-white/40">
                     {t("debug.offset")}
@@ -273,8 +324,9 @@ export default function AdvancedDebugPage() {
                   </span>
                 </div>
 
+                {/* 快捷加减 */}
                 <div>
-                  <div className="mb-2 text-[10px] uppercase tracking-widest text-white/40">
+                  <div className="mb-2 text-[11px] font-medium text-white/60">
                     {t("debug.quickAdjust")}
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -282,7 +334,7 @@ export default function AdvancedDebugPage() {
                       variant="outline"
                       size="sm"
                       disabled={timeLocked || setting}
-                      onClick={() => applyWithConfirm(0, "0")}
+                      onClick={() => advanceOffset(0, t("debug.btnReset"))}
                     >
                       {t("debug.btnReset")}
                     </Button>
@@ -290,42 +342,51 @@ export default function AdvancedDebugPage() {
                       variant="outline"
                       size="sm"
                       disabled={timeLocked || setting}
-                      onClick={() => applyWithConfirm(3600, "+1 小时")}
+                      onClick={() => advanceOffset(3600, "+1 小时")}
                     >
-                      {t("debug.btnPlus1h")}
+                      +1 时
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
                       disabled={timeLocked || setting}
-                      onClick={() => applyWithConfirm(86400, "+1 天")}
+                      onClick={() => advanceOffset(86400, "+1 天")}
                     >
-                      {t("debug.btnPlus1d")}
+                      +1 天
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
                       disabled={timeLocked || setting}
-                      onClick={() => applyWithConfirm(7 * 86400, "+7 天")}
+                      onClick={() => advanceOffset(7 * 86400, "+7 天")}
                     >
-                      {t("debug.btnPlus7d")}
+                      +7 天
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={timeLocked || setting}
+                      onClick={() => advanceOffset(-86400, "−1 天")}
+                    >
+                      −1 天
                     </Button>
                   </div>
                 </div>
 
+                {/* 自定义加减 */}
                 <div>
-                  <div className="mb-2 text-[10px] uppercase tracking-widest text-white/40">
-                    {t("debug.customOffset")}
+                  <div className="mb-2 text-[11px] font-medium text-white/60">
+                    {t("debug.advanceCustom")}
                   </div>
                   <div className="flex gap-2">
                     <Input
                       type="number"
-                      placeholder={t("debug.customOffset")}
-                      value={customOffsetVal}
+                      placeholder="数量"
+                      value={advanceVal}
                       disabled={timeLocked}
-                      onChange={(e) => setCustomOffsetVal(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleCustomOffset()}
-                      className="h-9 w-28 font-mono text-xs"
+                      onChange={(e) => setAdvanceVal(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleAdvance()}
+                      className="h-9 w-24 font-mono text-xs"
                     />
                     <div className="inline-flex h-9 overflow-hidden rounded-md border border-white/10 bg-black/40">
                       {OFFSET_UNITS.map((u) => (
@@ -333,9 +394,9 @@ export default function AdvancedDebugPage() {
                           key={u.key}
                           type="button"
                           disabled={timeLocked}
-                          onClick={() => setCustomOffsetUnit(u.key)}
+                          onClick={() => setAdvanceUnit(u.key)}
                           className={`h-full px-3 text-xs font-medium transition-colors ${
-                            customOffsetUnit === u.key
+                            advanceUnit === u.key
                               ? "bg-[#f59e0b]/20 text-[#f59e0b]"
                               : "text-white/50 hover:text-white/80"
                           } ${u.key !== "day" ? "border-r border-white/10" : ""}`}
@@ -347,10 +408,10 @@ export default function AdvancedDebugPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={timeLocked || setting || !customOffsetVal}
-                      onClick={handleCustomOffset}
+                      disabled={timeLocked || setting || !advanceVal}
+                      onClick={handleAdvance}
                     >
-                      {setting ? <Loader2 className="h-3 w-3 animate-spin" /> : t("common.submit")}
+                      {setting ? <Loader2 className="h-3 w-3 animate-spin" /> : "加速"}
                     </Button>
                   </div>
                 </div>
@@ -361,31 +422,91 @@ export default function AdvancedDebugPage() {
               </CardContent>
             </Card>
 
-            {/* 数据库重置 */}
-            <Card className="border-[#ef4444]/30">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Database className="h-5 w-5 text-[#ef4444]" />
-                  {t("debug.resetSection")}
-                </CardTitle>
-                <CardDescription>{t("debug.resetDesc")}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Button
-                  variant="danger"
-                  size="lg"
-                  className="w-full"
-                  disabled={resetting}
-                  onClick={() => void handleResetDb()}
-                >
-                  {resetting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    t("debug.resetBtn")
+            {/* ==================== 直接设定偏移 + 数据库重置 ==================== */}
+            <div className="flex flex-col gap-6">
+              {/* 直接设定偏移（绝对） */}
+              <Card className={`border-[#f59e0b]/30 ${timeLocked ? "opacity-60" : ""}`}>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Target className="h-5 w-5 text-[#f59e0b]" />
+                    {t("debug.directSetTitle")}
+                  </CardTitle>
+                  <CardDescription>{t("debug.directSetDesc")}</CardDescription>
+                  {timeLocked && (
+                    <CardDescription className="text-[#f59e0b]">
+                      {t("debug.testModeDisabled")}
+                    </CardDescription>
                   )}
-                </Button>
-              </CardContent>
-            </Card>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex gap-2">
+                    <Input
+                      type="number"
+                      placeholder="偏移量"
+                      value={directVal}
+                      disabled={timeLocked}
+                      onChange={(e) => setDirectVal(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleDirectSet()}
+                      className="h-9 w-24 font-mono text-xs"
+                    />
+                    <div className="inline-flex h-9 overflow-hidden rounded-md border border-white/10 bg-black/40">
+                      {OFFSET_UNITS.map((u) => (
+                        <button
+                          key={u.key}
+                          type="button"
+                          disabled={timeLocked}
+                          onClick={() => setDirectUnit(u.key)}
+                          className={`h-full px-3 text-xs font-medium transition-colors ${
+                            directUnit === u.key
+                              ? "bg-[#f59e0b]/20 text-[#f59e0b]"
+                              : "text-white/50 hover:text-white/80"
+                          } ${u.key !== "day" ? "border-r border-white/10" : ""}`}
+                        >
+                          {u.labelZh}
+                        </button>
+                      ))}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={timeLocked || setting || !directVal}
+                      onClick={() => { void handleDirectSet(); }}
+                    >
+                      {setting ? <Loader2 className="h-3 w-3 animate-spin" /> : "设定"}
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-white/40">
+                    直接写入精确的时间偏移值（秒），替换当前偏移。
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* 数据库重置 */}
+              <Card className="border-[#ef4444]/30">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Database className="h-5 w-5 text-[#ef4444]" />
+                    {t("debug.resetSection")}
+                  </CardTitle>
+                  <CardDescription>{t("debug.resetDesc")}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Button
+                    variant="danger"
+                    size="lg"
+                    className="w-full"
+                    disabled={resetting}
+                    onClick={() => { void handleResetDb(); }}
+                  >
+                    {resetting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      t("debug.resetBtn")
+                    )}
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
           </div>
         )}
       </div>

@@ -182,7 +182,7 @@ export function OrderList({ refreshKey }: { refreshKey: number }) {
                   <div className="text-right">
                     <div className="text-xs text-white/40">{t("stake.expectReturn")}</div>
                     <div className="font-bold text-[#b829ff]">
-                      ≈ {formatNumber(yieldUsdt, 2)} U
+                      ≈ {formatNumber(principal, 2)} {o.asset} + {formatNumber(yieldUsdt, 2)} U
                     </div>
                   </div>
                 </div>
