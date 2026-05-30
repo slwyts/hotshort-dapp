@@ -20,4 +20,10 @@ export default defineConfig({
     },
   ],
   // webServer 由 scripts/dev-local.sh 管理，不在这里启动
+  webServer: {
+    command: "bash scripts/dev-local.sh --e2e",
+    url: "http://localhost:3000",
+    reuseExistingServer: true,
+    timeout: 180_000,
+  },
 });

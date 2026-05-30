@@ -11,6 +11,7 @@ import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { VAULT_ABI } from "@/lib/contracts/abis";
 import { useContracts } from "@/lib/runtime-config";
+import { useServerTime } from "@/hooks/use-server-time";
 import { bpsToPercent } from "@/lib/constants/business-rules";
 import { cn, formatNumber, shortenAddress } from "@/lib/utils";
 import { formatUnits } from "viem";interface StakeOrder {
@@ -34,6 +35,7 @@ export function OrderList({ refreshKey }: { refreshKey: number }) {
   const [loading, setLoading] = useState(false);
   const { writeContractAsync } = useWriteContract();
   const { vault } = useContracts();
+  const serverNow = useServerTime();
   const refresh = useCallback(async () => {
     if (!isConnected || !address) return;
     let token = jwt;
@@ -149,7 +151,7 @@ export function OrderList({ refreshKey }: { refreshKey: number }) {
           <div className="py-8 text-center text-sm text-white/40">{t("stake.recordsEmpty")}</div>
         ) : (
           orders.map((o) => {
-            const matured = Math.floor(Date.now() / 1000) >= o.matures_at;
+            const matured = serverNow != null && serverNow >= o.matures_at;
             const totalBps = o.monthly_rate_bps * o.lock_months;
             const principal = Number(formatUnits(BigInt(o.amount), 18));
             const yieldUsdt = (principal * totalBps) / 10_000;

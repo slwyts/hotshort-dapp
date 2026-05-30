@@ -5,7 +5,8 @@ set -euo pipefail
 # hotshort-dapp 本地全栈测试启动脚本
 #
 # 用法：
-#   chmod +x scripts/dev-local.sh && ./scripts/dev-local.sh
+#   ./scripts/dev-local.sh          # 手动调试，时间偏移可用
+#   ./scripts/dev-local.sh --e2e    # E2E 自动化测试，开启测试模式
 #
 # 前置条件：
 #   - anvil (foundry)
@@ -18,6 +19,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+# --e2e 参数：开启 E2E 测试模式（启用 /__test/* 接口，高级调试页时间偏移禁用）
+E2E_MODE=0
+for arg in "$@"; do
+  if [ "$arg" = "--e2e" ]; then E2E_MODE=1; fi
+done
 
 ANVIL_PID=""
 WORKER_PID=""
@@ -205,7 +212,7 @@ HS_TOKEN=$HS_TOKEN_ADDRESS
 USDT_TOKEN=$USDT_TOKEN_ADDRESS
 PANCAKE_PAIR=$PANCAKE_PAIR_ADDRESS
 PANCAKE_LOTTERY_ADDRESS=
-E2E_TEST_MODE=1
+E2E_TEST_MODE=$E2E_MODE
 STOCK_QUOTE_MODE=auto
 SIGNER_PRIVATE_KEY=$SIGNER_PRIVATE_KEY
 JWT_SECRET=test-jwt-secret-for-local-dev

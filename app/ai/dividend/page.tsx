@@ -14,6 +14,7 @@ import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { VAULT_ABI } from "@/lib/contracts/abis";
 import { useContracts } from "@/lib/runtime-config";
+import { useServerTime } from "@/hooks/use-server-time";
 import { formatNumber } from "@/lib/utils";
 import {
   AI_AIRDROP_MIN_DAILY_STOCK,
@@ -47,6 +48,7 @@ export default function DividendPage() {
   const [loading, setLoading] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [claimingAirdrop, setClaimingAirdrop] = useState(false);
+  const serverNow = useServerTime();
 
   const refresh = useCallback(async () => {
     if (!isConnected) return;
@@ -193,7 +195,7 @@ export default function DividendPage() {
   const stockPrice = data.stock?.priceUsdt ?? 1;
   const enoughStock = AI_AIRDROP_MIN_DAILY_STOCK <= totalStock;
   const monthlyEligibleAt = data.airdrop?.monthlyEligibleAt ?? null;
-  const heldOneMonth = Boolean(monthlyEligibleAt && Date.now() / 1000 >= monthlyEligibleAt);
+  const heldOneMonth = Boolean(monthlyEligibleAt && serverNow != null && serverNow >= monthlyEligibleAt);
   const airdropReady = enoughStock && heldOneMonth;
   const monthlyEligibleDate = monthlyEligibleAt ? new Date(monthlyEligibleAt * 1000).toLocaleDateString("zh-CN") : "—";
 

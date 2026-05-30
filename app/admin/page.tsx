@@ -10,6 +10,7 @@ import {
   Wallet,
   Coins,
   BarChart3,
+  Wrench,
 } from "lucide-react";
 
 const sections = [
@@ -21,6 +22,7 @@ const sections = [
   { href: "/admin/lottery", icon: Ticket, title: "彩票管理", desc: "门票定价与开奖" },
   { href: "/admin/airdrop", icon: Flame, title: "版权空投", desc: "燃烧 HS 价值满 1000U 用户的空投发放管理" },
   { href: "/admin/funds", icon: Wallet, title: "资金与安全", desc: "Vault 余额、暂停、提取" },
+  { href: "/admin/advanced-debug", icon: Wrench, title: "高级调试", desc: "时间偏移与数据库重置（测试用）" },
 ];
 
 export default function AdminHomePage() {

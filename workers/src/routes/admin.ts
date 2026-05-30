@@ -9,6 +9,7 @@ import { readVaultOwner } from "../lib/vault-owner";
 import { ensureAgentTables, listAgentAlerts, listAgentUsers, normalizeAddress } from "../lib/agent-data";
 import { directReferralConfigKey } from "../lib/referral";
 import { importGenesisNode, normalizeAiTier } from "../lib/genesis-nodes";
+import { getTimeDebugInfo, realNowSeconds, setTimeOffset, todayBeijing, nowSeconds } from "../lib/time";
 import {
   AI_REFERRAL_DIRECT_BPS,
   AI_TIERS,
@@ -403,4 +404,139 @@ admin.get("/agents", async (c) => {
   const like = `%${q}%`;
   const rs = await c.env.DB.prepare(sql).bind(q, like).all();
   return c.json({ agents: rs.results ?? [] });
+});
+
+// ===== 高级调试 =====
+
+/** GET /admin/time-debug  当前时间调试信息 */
+admin.get("/time-debug", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  const info = await getTimeDebugInfo(c.env);
+  return c.json(info);
+});
+
+/** POST /admin/time-debug  设置时间偏移 { offsetSeconds: number } */
+admin.post("/time-debug", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  const body = (await c.req.json().catch(() => ({}))) as { offsetSeconds?: number };
+  if (!Number.isFinite(body.offsetSeconds)) return c.json({ error: "bad offsetSeconds" }, 400);
+  await setTimeOffset(c.env, body.offsetSeconds!);
+  return c.json(await getTimeDebugInfo(c.env));
+});
+
+// 重置数据库所用的表列表（与 test-control 保持一致，额外加 admin_config）
+const RESET_TABLES = [
+  "claim_signatures",
+  "agent_alert_acknowledgements",
+  "agent_accounts",
+  "referral_rewards",
+  "stock_sales",
+  "stock_swaps",
+  "stock_holdings",
+  "ai_stock_releases",
+  "ai_dividend_user_daily",
+  "ai_dividend_pool_daily",
+  "ai_orders",
+  "stake_orders",
+  "stake_rates",
+  "lottery_tickets",
+  "lottery_rounds",
+  "lottery_commits",
+  "burn_top10_settlements",
+  "burn_personal_status",
+  "burn_rounds",
+  "burn_records",
+  "airdrop_list",
+  "genesis_nodes",
+  "referral_paths",
+  "referral_codes",
+  "users",
+  "reward_claims",
+  "admin_config",
+];
+
+async function seedDefaults(env: Env, at: number): Promise<void> {
+  const rows: [string, string][] = [
+    ["stock_price_usdt", "1"],
+    ["stock_symbol", "WTO"],
+    ["stock_price_provider", "manual"],
+    ["stock_quote_mode", "auto"],
+    ["stock_volume_min_usdt", "100000"],
+    ["stock_volume_max_usdt", "200000"],
+    ["stock_dividend_ratio_bps", "100"],
+    ["lottery_ticket_price_usdt", "1"],
+    ["lottery_weekly_refill_hs", "100000"],
+    ["lottery_current_round", "1"],
+    ["burn_current_round", "1"],
+    ["pancake_lottery_address", ""],
+    ["indexer_last_block", "0"], // 下面会用最新区块覆盖
+  ];
+
+  for (const [key, value] of rows) {
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES (?, ?, 'admin-reset', ?)",
+    )
+      .bind(key, value, at)
+      .run();
+  }
+
+  // 恢复默认质押利率
+  for (const asset of ["USDT", "HS", "LP"] as const) {
+    const rates: Record<string, Record<number, number>> = {
+      USDT: { 1: 50, 3: 200, 6: 400, 12: 800 },
+      HS: { 1: 50, 3: 200, 6: 400, 12: 800 },
+      LP: { 1: 100, 3: 300, 6: 1000, 12: 2400 },
+    };
+    for (const [months, bps] of Object.entries(rates[asset])) {
+      await env.DB.prepare(
+        "INSERT OR REPLACE INTO stake_rates (asset, lock_months, monthly_rate_bps, updated_at) VALUES (?, ?, ?, ?)",
+      )
+        .bind(asset, Number(months), bps, at)
+        .run();
+    }
+  }
+}
+
+/** POST /admin/reset-db  清空所有业务数据并重置游标到当前区块 */
+admin.post("/reset-db", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+
+  const at = realNowSeconds();
+
+  // 1. 清空所有业务表
+  for (const table of RESET_TABLES) {
+    await c.env.DB.prepare(`DELETE FROM ${table}`).run();
+  }
+
+  // 2. 重新播种默认配置
+  await seedDefaults(c.env, at);
+
+  // 3. 同步游标到最新 BSC 区块
+  let latestBlock = 0;
+  try {
+    const res = await fetch(c.env.RPC_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+    });
+    const json = await res.json() as { result?: string };
+    if (json.result) {
+      latestBlock = Number(BigInt(json.result));
+      await c.env.DB.prepare(
+        "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('indexer_last_block', ?, 'admin-reset', ?)",
+      )
+        .bind(String(latestBlock), at)
+        .run();
+    }
+  } catch { /* RPC 不可用时游标保持 0，索引器会从最近 5 万块开始扫 */ }
+
+  return c.json({
+    reset: true,
+    tables: RESET_TABLES.length,
+    cursorBlock: latestBlock,
+    nowSeconds: at,
+  });
 });

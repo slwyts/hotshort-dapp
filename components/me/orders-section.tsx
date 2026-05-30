@@ -14,6 +14,7 @@ import { useSiweJwt } from "@/lib/hooks/use-siwe";
 import { api, endpoints } from "@/lib/api";
 import { VAULT_ABI } from "@/lib/contracts/abis";
 import { useContracts } from "@/lib/runtime-config";
+import { useServerTime } from "@/hooks/use-server-time";
 import { bpsToPercent } from "@/lib/constants/business-rules";
 import { cn, formatNumber, shortenAddress } from "@/lib/utils";
 
@@ -401,12 +402,13 @@ function StakeOrders({ orders, expanded, setExpanded, claimStake, claiming }: {
   claimStake: (id: string) => void;
   claiming: string | null;
 }) {
+  const serverNow = useServerTime();
   if (orders.length === 0) return <EmptyState href="/stake" text="还没有质押订单" />;
   return (
     <div className="space-y-2">
       {orders.map((order) => {
         const principal = weiToNumber(order.amount);
-        const matured = Math.floor(Date.now() / 1000) >= order.matures_at;
+        const matured = serverNow != null && serverNow >= order.matures_at;
         const expectedAsset = (principal * order.monthly_rate_bps * order.lock_months) / 10_000;
         const expectedFuel = expectedAsset * 0.05;
         const expectedNet = expectedAsset - expectedFuel;
