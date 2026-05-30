@@ -5,9 +5,10 @@ import { requireUser } from "./auth";
 import { upsertUser, createStakeOrder, requireBoundUser } from "../lib/users";
 import { getCurrentRateBps } from "../lib/rates";
 import { nowSeconds } from "../lib/time";
-import { createClaimSignature } from "../lib/claims";
+import { createClaimSignature, getExistingSignature } from "../lib/claims";
+import { deterministicNonce } from "../lib/nonce";
 import { stakeAssetYieldWeiToHsWei, tokenForStakeAsset } from "../lib/pricing";
-import { verifyVaultDeposit } from "../lib/vault-events";
+import { verifyVaultDeposit, verifyVaultClaim } from "../lib/vault-events";
 import {
   STAKE_ASSETS,
   STAKE_LOCK_MONTHS,
@@ -136,6 +137,12 @@ stake.post("/claim", async (c) => {
     return c.json({ error: "not matured" }, 400);
   }
 
+  const nonce = deterministicNonce("stake", order.id);
+
+  // 已有有效签名 → 直接返回（用户重试）
+  const existing = await getExistingSignature(c.env, nonce, now);
+  if (existing) return c.json(existing);
+
   const principal = BigInt(order.amount);
 
   // 收益（本位）= 本金 × 月利率 × 月数
@@ -169,11 +176,12 @@ stake.post("/claim", async (c) => {
       : [{ recipient: user as Address, amount: userHs }],
     reason,
     now,
+    nonce,
   });
 
-  // 标记订单已发签名（实际链上消费由 indexer 监听 Claimed → 写 used_at；此处先乐观更新）
-  await c.env.DB.prepare("UPDATE stake_orders SET claimed = 1 WHERE id = ?")
-    .bind(order.id)
+  // 只记录 nonce（用于索引器/confirm 回写），不乐观标记 claimed
+  await c.env.DB.prepare("UPDATE stake_orders SET claim_nonce = ? WHERE id = ?")
+    .bind(claim.nonce, order.id)
     .run();
 
   return c.json({
@@ -185,4 +193,38 @@ stake.post("/claim", async (c) => {
     yieldAssetAmount: yieldAsset.toString(),
     yieldAsset: order.asset,
   });
+});
+
+/**
+ * POST /stake/confirm  前端 tx 成功后即时回调，标记已领取。
+ * 入参: { txHash, orderId }
+ */
+stake.post("/confirm", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  const body = (await c.req.json().catch(() => ({}))) as { txHash?: string; orderId?: string };
+  if (!body.txHash || !/^0x[a-fA-F0-9]{64}$/.test(body.txHash)) return c.json({ error: "bad tx hash" }, 400);
+  if (!body.orderId) return c.json({ error: "bad orderId" }, 400);
+
+  const order = await c.env.DB.prepare(
+    "SELECT id, claim_nonce FROM stake_orders WHERE id = ? AND user = ?",
+  )
+    .bind(body.orderId, user)
+    .first<{ id: string; claim_nonce: string | null }>();
+  if (!order) return c.json({ error: "order not found" }, 404);
+
+  const expectedNonce = order.claim_nonce ? BigInt(order.claim_nonce) : undefined;
+  await verifyVaultClaim(c.env, {
+    txHash: body.txHash as Hex,
+    user: user as Address,
+    token: c.env.HS_TOKEN.toLowerCase() as Address,
+    reason: 1,
+    nonce: expectedNonce,
+  });
+
+  await c.env.DB.prepare("UPDATE stake_orders SET claimed = 1 WHERE id = ?")
+    .bind(order.id)
+    .run();
+
+  return c.json({ confirmed: true });
 });

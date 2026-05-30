@@ -103,6 +103,9 @@ export function OrderList({ refreshKey }: { refreshKey: number }) {
         ],
       });
 
+      // 即时确认：告诉后端 tx 已上链
+      api.post(endpoints.stakeConfirm, { orderId: id, txHash }, token).catch((e: unknown) => console.error("stake confirm failed", e));
+
       Swal.fire({
         icon: "success",
         title: t("stake.claim.successTitle"),

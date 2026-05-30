@@ -238,10 +238,11 @@ export function OrdersSection() {
       const sig = await api.post<ClaimSig>(endpoints.stakeClaim, { orderId }, token);
       Swal.fire({ title: t("stake.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const txHash = await sendVaultClaim(sig);
+      api.post(endpoints.stakeConfirm, { orderId, txHash }, token).catch((e: unknown) => console.error("stake confirm failed", e));
       await Swal.fire({
         icon: "success",
         title: t("stake.claim.successTitle"),
-        html: `${t("stake.claim.successBody", { amount: formatNumber(weiToNumber(sig.claimableHs), 4) })}<br/><span class="text-xs text-white/50">${displayTx(txHash)}</span>`,
+        html: `${t("stake.claim.successBody", { amount: formatNumber(weiToNumber(sig.claimableHs), 4) })}<br/><span class="text-xs text-white/50">${t("stake.claim.fuelNote", { amount: formatNumber(weiToNumber(sig.fuelBurnHs), 4) })}</span><br/><span class="text-xs text-white/40">${displayTx(txHash)}</span>`,
         background: "#141419",
         color: "#fff",
         confirmButtonColor: "#b829ff",
@@ -264,6 +265,7 @@ export function OrdersSection() {
       const sig = await api.post<ClaimSig>(endpoints.lotteryClaim, { ticketId }, token);
       Swal.fire({ title: t("lot.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const txHash = await sendVaultClaim(sig);
+      api.post(endpoints.lotteryConfirm, { ticketId, txHash }, token).catch((e: unknown) => console.error("lottery confirm failed", e));
       await Swal.fire({
         icon: "success",
         title: t("lot.claim.success.title"),

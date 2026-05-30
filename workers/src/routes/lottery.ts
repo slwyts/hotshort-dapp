@@ -6,9 +6,10 @@ import { upsertUser, requireBoundUser } from "../lib/users";
 import { ulid } from "../lib/ulid";
 import { computeHit } from "../lib/lottery";
 import { nowSeconds } from "../lib/time";
-import { createClaimSignature } from "../lib/claims";
+import { createClaimSignature, getExistingSignature } from "../lib/claims";
+import { deterministicNonce } from "../lib/nonce";
 import { decimalToWei, usdtWeiToHsWei } from "../lib/pricing";
-import { verifyVaultDeposit } from "../lib/vault-events";
+import { verifyVaultDeposit, verifyVaultClaim } from "../lib/vault-events";
 import { LOTTERY_TO_POOL_BPS, BPS_DENOMINATOR } from "@/lib/constants/business-rules";
 
 export const lottery = new Hono<{ Bindings: Env }>();
@@ -179,6 +180,13 @@ lottery.post("/claim", async (c) => {
   if (ticket.claimed) return c.json({ error: "already claimed" }, 400);
   if (!ticket.prize_hs || BigInt(ticket.prize_hs) <= 0n) return c.json({ error: "no prize" }, 400);
 
+  const nonce = deterministicNonce("lottery", ticket.id);
+  const now = await nowSeconds(c.env);
+
+  // 已有有效签名 → 直接返回
+  const existing = await getExistingSignature(c.env, nonce, now);
+  if (existing) return c.json(existing);
+
   const reason = 3; // LOTTERY_PRIZE
   const amount = BigInt(ticket.prize_hs);
 
@@ -187,14 +195,47 @@ lottery.post("/claim", async (c) => {
     token: c.env.HS_TOKEN.toLowerCase() as Address,
     payouts: [{ recipient: user as Address, amount }],
     reason,
-    now: await nowSeconds(c.env),
+    now,
+    nonce,
+  });
+
+  // 只记录 nonce，不乐观标记 claimed
+  await c.env.DB.prepare("UPDATE lottery_tickets SET claim_nonce = ? WHERE id = ?")
+    .bind(claim.nonce, ticket.id)
+    .run();
+
+  return c.json(claim);
+});
+
+/** POST /lottery/confirm  前端 tx 成功后即时回调 */
+lottery.post("/confirm", async (c) => {
+  const user = await requireUser(c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  const body = (await c.req.json().catch(() => ({}))) as { txHash?: string; ticketId?: string };
+  if (!body.txHash || !/^0x[a-fA-F0-9]{64}$/.test(body.txHash)) return c.json({ error: "bad tx hash" }, 400);
+  if (!body.ticketId) return c.json({ error: "bad ticketId" }, 400);
+
+  const ticket = await c.env.DB.prepare(
+    "SELECT id, claim_nonce FROM lottery_tickets WHERE id = ? AND user = ?",
+  )
+    .bind(body.ticketId, user)
+    .first<{ id: string; claim_nonce: string | null }>();
+  if (!ticket) return c.json({ error: "ticket not found" }, 404);
+
+  const expectedNonce = ticket.claim_nonce ? BigInt(ticket.claim_nonce) : undefined;
+  await verifyVaultClaim(c.env, {
+    txHash: body.txHash as Hex,
+    user: user as Address,
+    token: c.env.HS_TOKEN.toLowerCase() as Address,
+    reason: 3,
+    nonce: expectedNonce,
   });
 
   await c.env.DB.prepare("UPDATE lottery_tickets SET claimed = 1 WHERE id = ?")
     .bind(ticket.id)
     .run();
 
-  return c.json(claim);
+  return c.json({ confirmed: true });
 });
 
 // 仅供测试与人工触发（生产由 cron 0 16 * * 0 走）

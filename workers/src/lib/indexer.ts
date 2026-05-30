@@ -42,9 +42,10 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
     client.getLogs({ address: vault, event: BURNED_EVENT, fromBlock: from, toBlock: to }),
   ]);
 
-  // 确认 claim 链上消费 → claim_signatures.used_at
+  // 确认 claim 链上消费 → 标记各业务表
   for (const log of claimed) {
     const nonce = log.args.nonce?.toString();
+    const reason = Number(log.args.reason);
     if (!nonce) continue;
     const usedAt = Math.floor(Date.now() / 1000);
     await env.DB.prepare(
@@ -52,6 +53,53 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
     )
       .bind(usedAt, nonce)
       .run();
+
+    // reason=1 STAKE_YIELD → stake_orders
+    if (reason === 1) {
+      await env.DB.prepare(
+        "UPDATE stake_orders SET claimed = 1 WHERE claim_nonce = ? AND claimed = 0",
+      )
+        .bind(nonce)
+        .run();
+    }
+    // reason=3 LOTTERY_PRIZE → lottery_tickets
+    if (reason === 3) {
+      await env.DB.prepare(
+        "UPDATE lottery_tickets SET claimed = 1 WHERE claim_nonce = ? AND claimed = 0",
+      )
+        .bind(nonce)
+        .run();
+    }
+    // reason=4 BURN_DIVIDEND → 多表
+    if (reason === 4) {
+      await env.DB.prepare(
+        "UPDATE burn_top10_settlements SET claimed = 1 WHERE claim_nonce = ? AND claimed = 0",
+      )
+        .bind(nonce)
+        .run();
+      await env.DB.prepare(
+        "UPDATE referral_rewards SET claimed = 1 WHERE claim_nonce = ? AND claimed = 0",
+      )
+        .bind(nonce)
+        .run();
+    }
+    // reason=5 AI_REFERRAL → referral_rewards
+    if (reason === 5) {
+      await env.DB.prepare(
+        "UPDATE referral_rewards SET claimed = 1 WHERE claim_nonce = ? AND claimed = 0",
+      )
+        .bind(nonce)
+        .run();
+    }
+    // reason=6 AI_AIRDROP → reward_claims
+    if (reason === 6) {
+      await env.DB.prepare(
+        "UPDATE reward_claims SET claimed = 1 WHERE claim_nonce = ? AND claimed = 0",
+      )
+        .bind(nonce)
+        .run();
+    }
+
     await env.DB.prepare(
       "UPDATE stock_sales SET claimed_at = ?, claim_tx_hash = ? WHERE claim_nonce = ? AND claimed_at IS NULL",
     )

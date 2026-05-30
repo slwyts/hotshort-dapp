@@ -51,7 +51,7 @@ export function sumRewardRows(rows: RewardClaimRow[]): bigint {
 
 export async function markRewardRowsClaimed(env: Env, rows: RewardClaimRow[], nonce: string): Promise<void> {
   for (const row of rows) {
-    await env.DB.prepare("UPDATE reward_claims SET claimed = 1, claim_signature_nonce = ? WHERE id = ?")
+    await env.DB.prepare("UPDATE reward_claims SET claimed = 1, claim_nonce = ? WHERE id = ?")
       .bind(nonce, row.id)
       .run();
   }

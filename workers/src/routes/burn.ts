@@ -5,7 +5,8 @@ import { requireUser } from "./auth";
 import { upsertUser, requireBoundUser } from "../lib/users";
 import { ulid } from "../lib/ulid";
 import { nowSeconds } from "../lib/time";
-import { createClaimSignature } from "../lib/claims";
+import { createClaimSignature, getExistingSignature } from "../lib/claims";
+import { deterministicNonce } from "../lib/nonce";
 import { markRewardRowsClaimed, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
 import { readTokenBalance } from "../lib/token-balance";
 import { verifyVaultBurn, verifyVaultClaim } from "../lib/vault-events";
@@ -322,21 +323,31 @@ burn.post("/claim/top10", async (c) => {
 
   const hsToken = c.env.HS_TOKEN.toLowerCase() as Address;
   const reason = 4; // BURN_DIVIDEND
+  const nonce = deterministicNonce("burn-top10", user);
+  const now = await nowSeconds(c.env);
+
+  // 已有有效签名 → 直接返回
+  const existing = await getExistingSignature(c.env, nonce, now);
+  if (existing) return c.json({ ...existing, top10Rows: rows.results?.length ?? 0, rewardRows: rewardRows.results?.length ?? 0, referralRows: referralRows.results?.length ?? 0 });
 
   const claim = await createClaimSignature(c.env, {
     user: user as Address,
     token: hsToken,
     payouts: [{ recipient: user as Address, amount: total }],
     reason,
+    nonce,
   });
 
-  await c.env.DB.prepare("UPDATE burn_top10_settlements SET claimed = 1 WHERE user = ? AND claimed = 0")
-    .bind(user)
+  // 记录 nonce 到各表以便索引器/confirm 回写，标记已发签名
+  const nonceStr = claim.nonce;
+  await c.env.DB.prepare("UPDATE burn_top10_settlements SET claimed = 1, claim_nonce = ? WHERE user = ? AND claimed = 0")
+    .bind(nonceStr, user)
     .run();
-  await markRewardRowsClaimed(c.env, rewardRows.results ?? [], claim.nonce);
-  await c.env.DB.prepare("UPDATE referral_rewards SET claimed = 1 WHERE user = ? AND claimed = 0 AND reward_token = 'HS' AND kind IN ('burn-gen1', 'burn-gen2')")
-    .bind(user)
+  await markRewardRowsClaimed(c.env, rewardRows.results ?? [], nonceStr);
+  await c.env.DB.prepare("UPDATE referral_rewards SET claimed = 1, claim_nonce = ? WHERE user = ? AND claimed = 0 AND reward_token = 'HS' AND kind IN ('burn-gen1', 'burn-gen2')")
+    .bind(nonceStr, user)
     .run();
+
   return c.json({
     ...claim,
     top10Rows: rows.results?.length ?? 0,

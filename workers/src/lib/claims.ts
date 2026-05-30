@@ -28,6 +28,42 @@ export function hashPayouts(payouts: ClaimPayout[]): Hex {
   ));
 }
 
+/**
+ * 查询已有签名（未过期、未使用），用于防重复签发。
+ * 如果存在且未过期，返回已有签名；否则返回 null。
+ */
+export async function getExistingSignature(
+  env: Env,
+  nonce: bigint,
+  now: number,
+): Promise<ClaimSignatureResponse | null> {
+  const row = await env.DB.prepare(
+    "SELECT nonce, user, token, amount, reason, deadline, signature, recipients_json FROM claim_signatures WHERE nonce = ? AND used_at IS NULL AND deadline > ?",
+  )
+    .bind(nonce.toString(), now)
+    .first<{ nonce: string; user: string; token: string; amount: string; reason: number; deadline: number; signature: Hex; recipients_json: string | null }>();
+  if (!row) return null;
+  let recipients: Address[] = [];
+  let amounts: string[] = [];
+  if (row.recipients_json) {
+    try {
+      const parsed = JSON.parse(row.recipients_json) as { recipients: Address[]; amounts: string[] };
+      recipients = parsed.recipients;
+      amounts = parsed.amounts;
+    } catch { / ignore / }
+  }
+  return {
+    token: row.token as Address,
+    recipients: recipients.length > 0 ? recipients : [row.user as Address],
+    amounts: amounts.length > 0 ? amounts : [row.amount],
+    amount: row.amount,
+    nonce: row.nonce,
+    deadline: row.deadline,
+    reason: row.reason,
+    signature: row.signature,
+  };
+}
+
 export async function createClaimSignature(
   env: Env,
   params: {
@@ -37,6 +73,7 @@ export async function createClaimSignature(
     payouts?: ClaimPayout[];
     reason: number;
     now?: number;
+    nonce?: bigint;
   },
 ): Promise<ClaimSignatureResponse> {
   const payouts = params.payouts ?? [{ recipient: params.user, amount: params.amount ?? 0n }];
@@ -52,7 +89,7 @@ export async function createClaimSignature(
   const vault = env.VAULT_ADDRESS.toLowerCase() as Address;
   const chainId = Number(env.CHAIN_ID);
   const privateKey = requireSecret(env, "SIGNER_PRIVATE_KEY") as `0x${string}`;
-  const nonce = randomNonce();
+  const nonce = params.nonce ?? randomNonce();
   const deadline = BigInt(now + 30 * 60);
   const token = params.token.toLowerCase() as Address;
   const user = params.user.toLowerCase() as Address;
@@ -68,10 +105,15 @@ export async function createClaimSignature(
   });
 
   await env.DB.prepare(
-    `INSERT INTO claim_signatures (nonce, user, token, amount, reason, deadline, signature, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO claim_signatures
+       (nonce, user, token, amount, reason, deadline, signature, recipients_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM claim_signatures WHERE nonce = ?), ?))`,
   )
-    .bind(nonce.toString(), user, token, total.toString(), params.reason, Number(deadline), signature, now)
+    .bind(
+      nonce.toString(), user, token, total.toString(), params.reason, Number(deadline), signature,
+      JSON.stringify({ recipients: normalizedPayouts.map((p) => p.recipient), amounts: normalizedPayouts.map((p) => p.amount.toString()) }),
+      nonce.toString(), now,
+    )
     .run();
 
   return {

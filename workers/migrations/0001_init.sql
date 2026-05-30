@@ -59,10 +59,12 @@ CREATE TABLE IF NOT EXISTS stake_orders (
   started_at INTEGER NOT NULL,
   matures_at INTEGER NOT NULL,
   claimed INTEGER NOT NULL DEFAULT 0,
+  claim_nonce TEXT,
   claim_tx_hash TEXT,
   source_tx_hash TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_stake_user ON stake_orders(user, claimed);
+CREATE INDEX IF NOT EXISTS idx_stake_claim_nonce ON stake_orders(claim_nonce);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_stake_source_tx ON stake_orders(source_tx_hash);
 
 -- 当前生效的质押利率
@@ -175,7 +177,7 @@ CREATE TABLE IF NOT EXISTS referral_rewards (
   source_ref TEXT,
   earned_at INTEGER NOT NULL,
   claimed INTEGER NOT NULL DEFAULT 0,
-  claim_signature_nonce TEXT
+  claim_nonce TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_referral_user ON referral_rewards(user, claimed);
 CREATE INDEX IF NOT EXISTS idx_referral_source ON referral_rewards(source_user);
@@ -205,9 +207,11 @@ CREATE TABLE IF NOT EXISTS lottery_tickets (
   hit_digits INTEGER,
   prize_hs TEXT,
   claimed INTEGER NOT NULL DEFAULT 0,
+  claim_nonce TEXT,
   bought_at INTEGER NOT NULL,
   source_tx_hash TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_lottery_tickets_claim_nonce ON lottery_tickets(claim_nonce);
 CREATE INDEX IF NOT EXISTS idx_lottery_user ON lottery_tickets(user, round_no);
 CREATE INDEX IF NOT EXISTS idx_lottery_round ON lottery_tickets(round_no);
 
@@ -268,7 +272,8 @@ CREATE TABLE IF NOT EXISTS burn_top10_settlements (
   rank INTEGER NOT NULL,
   burn_hs TEXT NOT NULL,
   reward_hs TEXT NOT NULL,
-  claimed INTEGER NOT NULL DEFAULT 0
+  claimed INTEGER NOT NULL DEFAULT 0,
+  claim_nonce TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_burn_top10_user ON burn_top10_settlements(user, claimed);
 CREATE INDEX IF NOT EXISTS idx_burn_top10_round ON burn_top10_settlements(round);
@@ -283,7 +288,7 @@ CREATE TABLE IF NOT EXISTS reward_claims (
   round INTEGER,
   source_ref TEXT NOT NULL,
   claimed INTEGER NOT NULL DEFAULT 0,
-  claim_signature_nonce TEXT,
+  claim_nonce TEXT,
   created_at INTEGER NOT NULL,
   UNIQUE(user, kind, source_ref)
 );
@@ -327,6 +332,7 @@ CREATE TABLE IF NOT EXISTS claim_signatures (
   reason INTEGER NOT NULL,
   deadline INTEGER NOT NULL,
   signature TEXT NOT NULL,
+  recipients_json TEXT,
   used_at INTEGER,
   created_at INTEGER NOT NULL
 );

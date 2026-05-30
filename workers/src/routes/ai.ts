@@ -15,7 +15,8 @@ import {
 } from "../lib/stocks";
 import { ulid } from "../lib/ulid";
 import { nowSeconds, todayBeijing } from "../lib/time";
-import { createClaimSignature } from "../lib/claims";
+import { createClaimSignature, getExistingSignature } from "../lib/claims";
+import { deterministicNonce } from "../lib/nonce";
 import { addRewardClaim, markRewardRowsClaimed, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
 import { recordAiPackageOrder } from "../lib/ai-orders";
 import { decimalToWei, hsWeiToUsdtWei, stockWeiToUsdtWei, usdtWeiToHsWei } from "../lib/pricing";
@@ -444,15 +445,22 @@ ai.post("/referral/claim", async (c) => {
   for (const row of refs.results ?? []) total += BigInt(row.reward_amount);
   if (total <= 0n) return c.json({ amount: "0" });
 
+  const nonce = deterministicNonce("ai-ref", user);
+  const now = await nowSeconds(c.env);
+
+  const existing = await getExistingSignature(c.env, nonce, now);
+  if (existing) return c.json({ ...existing, rows: refs.results?.length ?? 0 });
+
   const claim = await createClaimSignature(c.env, {
     user: user as Address,
     token: c.env.USDT_TOKEN.toLowerCase() as Address,
     payouts: [{ recipient: user as Address, amount: total }],
     reason: 5,
+    nonce,
   });
 
-  await c.env.DB.prepare("UPDATE referral_rewards SET claimed = 1 WHERE user = ? AND claimed = 0 AND reward_token = 'USDT'")
-    .bind(user)
+  await c.env.DB.prepare("UPDATE referral_rewards SET claimed = 1, claim_nonce = ? WHERE user = ? AND claimed = 0 AND reward_token = 'USDT'")
+    .bind(claim.nonce, user)
     .run();
   return c.json({ ...claim, rows: refs.results?.length ?? 0 });
 });
@@ -517,11 +525,17 @@ ai.post("/airdrop/claim", async (c) => {
   const total = sumRewardRows(rows.results ?? []);
   if (total <= 0n) return c.json({ token: null, amount: "0", note: "no claimable" });
 
+  const nonce = deterministicNonce("ai-airdrop", user);
+
+  const existing = await getExistingSignature(c.env, nonce, now);
+  if (existing) return c.json({ ...existing, rows: rows.results?.length ?? 0 });
+
   const claim = await createClaimSignature(c.env, {
     user: user as Address,
     token: c.env.HS_TOKEN.toLowerCase() as Address,
     payouts: [{ recipient: user as Address, amount: total }],
     reason: 6,
+    nonce,
   });
   await markRewardRowsClaimed(c.env, rows.results ?? [], claim.nonce);
   return c.json({ ...claim, rows: rows.results?.length ?? 0 });
