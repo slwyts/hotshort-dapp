@@ -3,7 +3,6 @@ import { privateKeyToAccount } from "viem/accounts";
 
 export interface ClaimPayload {
   user: Address;
-  token: Address;
   payoutsHash: Hex;
   nonce: bigint;
   deadline: bigint;
@@ -12,7 +11,7 @@ export interface ClaimPayload {
 
 const CLAIM_TYPEHASH = keccak256(
   new TextEncoder().encode(
-    "Claim(address user,address token,bytes32 payoutsHash,uint256 nonce,uint256 deadline,uint8 reason)",
+    "Claim(address user,bytes32 payoutsHash,uint256 nonce,uint256 deadline,uint8 reason)",
   ) as Uint8Array,
 );
 
@@ -28,7 +27,6 @@ export function buildDomain(chainId: number, vault: Address) {
 export const CLAIM_TYPES = {
   Claim: [
     { name: "user", type: "address" },
-    { name: "token", type: "address" },
     { name: "payoutsHash", type: "bytes32" },
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
@@ -52,7 +50,6 @@ export async function signClaim(
     primaryType: "Claim",
     message: {
       user: payload.user,
-      token: payload.token,
       payoutsHash: payload.payoutsHash,
       nonce: payload.nonce,
       deadline: payload.deadline,
@@ -69,13 +66,12 @@ export function claimStructHash(p: ClaimPayload): Hex {
       [
         { type: "bytes32" },
         { type: "address" },
-        { type: "address" },
         { type: "bytes32" },
         { type: "uint256" },
         { type: "uint256" },
         { type: "uint8" },
       ],
-      [CLAIM_TYPEHASH, p.user, p.token, p.payoutsHash, p.nonce, p.deadline, p.reason],
+      [CLAIM_TYPEHASH, p.user, p.payoutsHash, p.nonce, p.deadline, p.reason],
     ),
   );
 }

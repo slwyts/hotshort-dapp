@@ -141,6 +141,8 @@ export interface CreateStakeOrderInput {
   user: string;
   asset: "USDT" | "HS" | "LP";
   amountWei: string;
+  entryValueUsdtWei: string;
+  entryPriceJson?: string | null;
   lockMonths: 1 | 3 | 6 | 12;
   monthlyRateBps: number;
   sourceTxHash: string;
@@ -152,14 +154,16 @@ export async function createStakeOrder(env: Env, i: CreateStakeOrderInput): Prom
   const matures = startedAt + i.lockMonths * 30 * 86400;
   await env.DB.prepare(
     `INSERT INTO stake_orders
-      (id, user, asset, amount, lock_months, monthly_rate_bps, started_at, matures_at, source_tx_hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, user, asset, amount, entry_value_usdt, entry_price_json, lock_months, monthly_rate_bps, started_at, matures_at, source_tx_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
       i.user.toLowerCase(),
       i.asset,
       i.amountWei,
+      i.entryValueUsdtWei,
+      i.entryPriceJson ?? null,
       i.lockMonths,
       i.monthlyRateBps,
       startedAt,

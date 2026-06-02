@@ -65,7 +65,7 @@ export const VAULT_ABI = [
     name: "claim",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "token", type: "address" },
+      { name: "tokens", type: "address[]" },
       { name: "recipients", type: "address[]" },
       { name: "amounts", type: "uint256[]" },
       { name: "nonce", type: "uint256" },

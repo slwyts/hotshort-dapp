@@ -27,10 +27,8 @@ export default function AdminFundsPage() {
   const [pending, setPending] = useState<PendingRow[]>([]);
 
   // LP 分红配置
-  const [lpAmount, setLpAmount] = useState("100000");
-  const [lpIntervalN, setLpIntervalN] = useState("1");
-  const [lpIntervalUnit, setLpIntervalUnit] = useState<"day"|"week"|"month">("week");
-  const [lpNextAt, setLpNextAt] = useState(0);
+  const [lpThreshold, setLpThreshold] = useState("100");
+  const [lpPendingUsdtWei, setLpPendingUsdtWei] = useState("0");
   const [lpLastAt, setLpLastAt] = useState(0);
   const [lpRound, setLpRound] = useState(0);
   const [lpSaving, setLpSaving] = useState(false);
@@ -90,16 +88,11 @@ export default function AdminFundsPage() {
     const token = jwt ?? (await signIn());
     if (!token) return;
     try {
-      const r = await api.get<{ amountHs: string; intervalSeconds: number; lastAt: number; round: number; nextAt: number }>(endpoints.adminLpDividend, token);
-      setLpAmount(r.amountHs);
+      const r = await api.get<{ thresholdUsdt: string; pendingUsdtWei: string; lastAt: number; round: number }>(endpoints.adminLpDividend, token);
+      setLpThreshold(r.thresholdUsdt);
+      setLpPendingUsdtWei(r.pendingUsdtWei);
       setLpRound(r.round);
       setLpLastAt(r.lastAt);
-      setLpNextAt(r.nextAt);
-      // 从 intervalSeconds 推回 N + unit
-      const sec = r.intervalSeconds;
-      if (sec % (30*86400) === 0) { setLpIntervalN(String(sec / (30*86400))); setLpIntervalUnit("month"); }
-      else if (sec % 604800 === 0) { setLpIntervalN(String(sec / 604800)); setLpIntervalUnit("week"); }
-      else { setLpIntervalN(String(sec / 86400)); setLpIntervalUnit("day"); }
     } catch { /* ignore */ }
   }, [jwt, signIn]);
 
@@ -111,15 +104,11 @@ export default function AdminFundsPage() {
     const token = jwt ?? (await signIn());
     if (!token) return;
     setLpSaving(true);
-    const n = Number(lpIntervalN);
-    if (!Number.isFinite(n) || n <= 0) { setLpSaving(false); return; }
-    let intervalSec = n * 86400;
-    if (lpIntervalUnit === "week") intervalSec = n * 604800;
-    else if (lpIntervalUnit === "month") intervalSec = n * 30 * 86400;
+    const threshold = Number(lpThreshold);
+    if (!Number.isFinite(threshold) || threshold <= 0) { setLpSaving(false); return; }
     try {
       await api.post(endpoints.adminLpDividend, {
-        amountHs: Number(lpAmount),
-        intervalSeconds: intervalSec,
+        thresholdUsdt: lpThreshold,
       }, token);
       await fetchLpConfig();
     } catch { /* ignore */ } finally { setLpSaving(false); }
@@ -149,8 +138,9 @@ export default function AdminFundsPage() {
     if (!c.isConfirmed) return;
     setLpTriggering(true);
     try {
-      const r = await api.post<{ round: number; amountHs: string; recipients: number; skipped: boolean }>(endpoints.adminLpDividendTrigger, {}, token);
-      await Swal.fire({ icon: "success", title: "分发完成", html: `轮次 ${r.round}，${Number(BigInt(r.amountHs))/1e18} HS，${r.recipients} 个接收人`, background: "#141419", color: "#fff", confirmButtonColor: "#b829ff" });
+      const r = await api.post<{ round: number; amountUsdt: string; recipients: number; skipped: boolean; pendingUsdt: string }>(endpoints.adminLpDividendTrigger, {}, token);
+      const amount = Number(formatUnits(BigInt(r.amountUsdt), 18));
+      await Swal.fire({ icon: "success", title: r.skipped ? "暂无可分发" : "分发完成", html: `轮次 ${r.round}，${formatNumber(amount, 4)} USDT，${r.recipients} 个接收人`, background: "#141419", color: "#fff", confirmButtonColor: "#b829ff" });
       await fetchLpConfig();
     } catch (e) {
       await Swal.fire({ icon: "error", title: "分发失败", text: (e as Error).message, background: "#141419", color: "#fff" });
@@ -350,52 +340,26 @@ export default function AdminFundsPage() {
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Coins className="h-5 w-5 text-[#f59e0b]" /> LP 交易分红
               </CardTitle>
-              <p className="text-xs text-white/40">HS 交易买卖滑点产生的 LP 分红，按 70%/30% 分给所有燃烧者和 Top10。</p>
+              <p className="text-xs text-white/40">监听 HS 合约打入 Vault 的 USDT 分红，累计达到阈值后按 70%/30% 分给所有燃烧者和 Top10。</p>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* 每期数量 */}
               <div className="flex items-center gap-2">
-                <span className="text-xs text-white/50 shrink-0">每期</span>
+                <span className="text-xs text-white/50 shrink-0">触发阈值</span>
                 <input
                   type="number"
-                  value={lpAmount}
-                  onChange={(e) => setLpAmount(e.target.value)}
+                  value={lpThreshold}
+                  onChange={(e) => setLpThreshold(e.target.value)}
                   className="h-8 w-28 rounded-md border border-white/10 bg-black/40 px-2 font-mono text-xs text-white"
                 />
-                <span className="text-xs text-white/50">HS</span>
-              </div>
-
-              {/* 间隔：N + 单位分段按钮 */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-white/50 shrink-0">每</span>
-                <input
-                  type="number"
-                  value={lpIntervalN}
-                  onChange={(e) => setLpIntervalN(e.target.value)}
-                  className="h-8 w-16 rounded-md border border-white/10 bg-black/40 px-2 font-mono text-xs text-white"
-                />
-                <div className="inline-flex h-8 overflow-hidden rounded-md border border-white/10 bg-black/40">
-                  {(["day","week","month"] as const).map((u) => (
-                    <button
-                      key={u}
-                      type="button"
-                      onClick={() => setLpIntervalUnit(u)}
-                      className={`h-full px-3 text-xs font-medium transition-colors ${
-                        lpIntervalUnit === u ? "bg-[#f59e0b]/20 text-[#f59e0b]" : "text-white/50 hover:text-white/80"
-                      } ${u !== "month" ? "border-r border-white/10" : ""}`}
-                    >
-                      {u === "day" ? "天" : u === "week" ? "周" : "月"}
-                    </button>
-                  ))}
-                </div>
+                <span className="text-xs text-white/50">USDT</span>
               </div>
 
               {/* 分发信息 */}
               <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/5 bg-black/40 p-3">
                 <div>
-                  <div className="text-[10px] text-white/40">下次分发</div>
+                  <div className="text-[10px] text-white/40">未结算入账</div>
                   <div className="text-xs font-mono text-white">
-                    {lpLastAt ? new Date(lpNextAt * 1000).toLocaleString("zh-CN") : "点击「立即分发」开始"}
+                    {formatNumber(Number(formatUnits(BigInt(lpPendingUsdtWei), 18)), 4)} USDT
                   </div>
                 </div>
                 <div>

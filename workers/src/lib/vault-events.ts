@@ -70,7 +70,7 @@ export async function verifyVaultBurn(env: Env, expected: {
 export async function verifyVaultClaim(env: Env, expected: {
   txHash: Hex;
   user: Address;
-  token: Address;
+  token?: Address;
   reason: number;
   nonce?: bigint;
 }): Promise<{ amount: bigint; nonce: bigint }> {
@@ -81,7 +81,7 @@ export async function verifyVaultClaim(env: Env, expected: {
       const args = decoded.args as { user?: Address; token?: Address; amount?: bigint; reason?: number; nonce?: bigint };
       if (
         sameAddress(args.user, expected.user) &&
-        sameAddress(args.token, expected.token) &&
+        (expected.token === undefined || sameAddress(args.token, expected.token)) &&
         Number(args.reason) === expected.reason &&
         args.amount !== undefined &&
         args.nonce !== undefined &&

@@ -38,6 +38,7 @@ interface SellResponse {
   stockPriceUsdt: number;
   hsPriceUsdt: number;
   token: string;
+  tokens?: string[];
   recipients: string[];
   amounts: string[];
   amount: string;
@@ -120,6 +121,7 @@ export default function AiSellPage() {
       const stockAmountWei = parseUnits(stockAmount, 18).toString();
       Swal.fire({ title: t("ai.sell.preparing"), background: "#141419", color: "#fff", allowOutsideClick: false, didOpen: () => Swal.showLoading() });
       sale = await api.post<SellResponse>(endpoints.aiSell, { stockAmountWei }, token);
+      const claimSale = sale;
 
       Swal.fire({ title: t("ai.sell.confirmWallet"), background: "#141419", color: "#fff", allowOutsideClick: false, didOpen: () => Swal.showLoading() });
       await writeContractAsync({
@@ -127,13 +129,13 @@ export default function AiSellPage() {
         abi: VAULT_ABI,
         functionName: "claim",
         args: [
-          sale.token as `0x${string}`,
-          sale.recipients as `0x${string}`[],
-          sale.amounts.map((amount) => BigInt(amount)),
-          BigInt(sale.nonce),
-          BigInt(sale.deadline),
-          sale.reason,
-          sale.signature as `0x${string}`,
+          (claimSale.tokens ?? claimSale.amounts.map(() => claimSale.token)) as `0x${string}`[],
+          claimSale.recipients as `0x${string}`[],
+          claimSale.amounts.map((amount) => BigInt(amount)),
+          BigInt(claimSale.nonce),
+          BigInt(claimSale.deadline),
+          claimSale.reason,
+          claimSale.signature as `0x${string}`,
         ],
       });
 

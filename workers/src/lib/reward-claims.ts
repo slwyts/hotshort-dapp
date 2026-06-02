@@ -56,3 +56,11 @@ export async function markRewardRowsClaimed(env: Env, rows: RewardClaimRow[], no
       .run();
   }
 }
+
+export async function markRewardRowsSigned(env: Env, rows: RewardClaimRow[], nonce: string): Promise<void> {
+  for (const row of rows) {
+    await env.DB.prepare("UPDATE reward_claims SET claim_nonce = ? WHERE id = ? AND claimed = 0")
+      .bind(nonce, row.id)
+      .run();
+  }
+}

@@ -28,7 +28,7 @@ contract HotshortVault is Ownable, Pausable, EIP712 {
     mapping(uint256 => bool) public usedNonces;
 
     bytes32 public constant CLAIM_TYPEHASH = keccak256(
-        "Claim(address user,address token,bytes32 payoutsHash,uint256 nonce,uint256 deadline,uint8 reason)"
+        "Claim(address user,bytes32 payoutsHash,uint256 nonce,uint256 deadline,uint8 reason)"
     );
 
     constructor(address _owner, address _signer)
@@ -48,7 +48,7 @@ contract HotshortVault is Ownable, Pausable, EIP712 {
     }
 
     function claim(
-        address token,
+        address[] calldata tokens,
         address[] calldata recipients,
         uint256[] calldata amounts,
         uint256 nonce,
@@ -56,13 +56,13 @@ contract HotshortVault is Ownable, Pausable, EIP712 {
         uint8 reason,
         bytes calldata sig
     ) external whenNotPaused {
-        if (recipients.length == 0 || recipients.length != amounts.length) revert BadPayouts();
+        if (tokens.length == 0 || tokens.length != recipients.length || recipients.length != amounts.length) revert BadPayouts();
         if (block.timestamp > deadline) revert Expired();
         if (usedNonces[nonce]) revert NonceUsed();
 
-        bytes32 payoutsHash = keccak256(abi.encode(recipients, amounts));
+        bytes32 payoutsHash = keccak256(abi.encode(tokens, recipients, amounts));
         bytes32 structHash = keccak256(
-            abi.encode(CLAIM_TYPEHASH, msg.sender, token, payoutsHash, nonce, deadline, reason)
+            abi.encode(CLAIM_TYPEHASH, msg.sender, payoutsHash, nonce, deadline, reason)
         );
         bytes32 digest = _hashTypedDataV4(structHash);
 
@@ -70,15 +70,12 @@ contract HotshortVault is Ownable, Pausable, EIP712 {
         if (recovered != signer) revert BadSignature();
 
         usedNonces[nonce] = true;
-        uint256 total;
         for (uint256 i = 0; i < recipients.length; i++) {
-            if (recipients[i] == address(0) || amounts[i] == 0) revert BadPayouts();
-            total += amounts[i];
-            bool ok = IERC20(token).transfer(recipients[i], amounts[i]);
+            if (tokens[i] == address(0) || recipients[i] == address(0) || amounts[i] == 0) revert BadPayouts();
+            bool ok = IERC20(tokens[i]).transfer(recipients[i], amounts[i]);
             if (!ok) revert TransferFailed();
+            emit Claimed(msg.sender, tokens[i], amounts[i], reason, nonce);
         }
-
-        emit Claimed(msg.sender, token, total, reason, nonce);
     }
 
     function swapHsToStock(address hsToken, uint256 hsAmount) external whenNotPaused {

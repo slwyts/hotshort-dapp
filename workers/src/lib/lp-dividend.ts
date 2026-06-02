@@ -1,6 +1,6 @@
 import type { Env } from "../env";
-import { ulid } from "./ulid";
 import { nowSeconds } from "./time";
+import { addRewardClaim } from "./reward-claims";
 import {
   BURN_LP_DIVIDEND_HOLDER_BPS,
   BURN_LP_DIVIDEND_TOP10_BPS,
@@ -8,30 +8,35 @@ import {
 } from "@/lib/constants/business-rules";
 
 interface LpDividendConfig {
-  amountHs: bigint;
-  intervalSeconds: number;
+  thresholdUsdt: bigint;
   lastAt: number;
   round: number;
 }
 
+interface LpTaxReceiptRow {
+  id: string;
+  amount_usdt: string;
+}
+
+function decimalToWeiString(value: string): bigint {
+  const text = value.trim();
+  if (!/^\d+(\.\d{0,18})?$/.test(text)) return 0n;
+  const [whole, fraction = ""] = text.split(".");
+  return BigInt(whole || "0") * 10n ** 18n + BigInt((fraction + "0".repeat(18)).slice(0, 18));
+}
+
 async function readConfig(env: Env): Promise<LpDividendConfig> {
-  const keys = [
-    "lp_dividend_amount_hs",
-    "lp_dividend_interval_seconds",
-    "lp_dividend_last_at",
-    "lp_dividend_round",
-  ];
+  const keys = ["lp_dividend_threshold_usdt", "lp_dividend_last_at", "lp_dividend_round"];
   const rows = await env.DB.prepare(
     `SELECT key, value FROM admin_config WHERE key IN (${keys.map(() => "?").join(",")})`,
   )
     .bind(...keys)
     .all<{ key: string; value: string }>();
   const map = new Map<string, string>();
-  for (const r of rows.results ?? []) map.set(r.key, r.value);
+  for (const row of rows.results ?? []) map.set(row.key, row.value);
 
   return {
-    amountHs: BigInt(map.get("lp_dividend_amount_hs") ?? "100000") * 10n ** 18n,
-    intervalSeconds: Number(map.get("lp_dividend_interval_seconds") ?? "604800"),
+    thresholdUsdt: decimalToWeiString(map.get("lp_dividend_threshold_usdt") ?? "100"),
     lastAt: Number(map.get("lp_dividend_last_at") ?? "0"),
     round: Number(map.get("lp_dividend_round") ?? "0"),
   };
@@ -39,12 +44,12 @@ async function readConfig(env: Env): Promise<LpDividendConfig> {
 
 async function saveRoundMeta(env: Env, round: number, now: number): Promise<void> {
   await env.DB.prepare(
-    "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('lp_dividend_last_at', ?, 'cron', ?)",
+    "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('lp_dividend_last_at', ?, 'lp-dividend', ?)",
   )
     .bind(String(now), now)
     .run();
   await env.DB.prepare(
-    "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('lp_dividend_round', ?, 'cron', ?)",
+    "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('lp_dividend_round', ?, 'lp-dividend', ?)",
   )
     .bind(String(round), now)
     .run();
@@ -53,52 +58,78 @@ async function saveRoundMeta(env: Env, round: number, now: number): Promise<void
 async function outUsers(env: Env): Promise<Set<string>> {
   const rows = await env.DB.prepare("SELECT user FROM burn_personal_status WHERE out_at IS NOT NULL")
     .all<{ user: string }>();
-  return new Set((rows.results ?? []).map((r) => r.user.toLowerCase()));
+  return new Set((rows.results ?? []).map((row) => row.user.toLowerCase()));
 }
 
-/**
- * 分发 LP 交易分红：按管理员设定的固定 HS 税额，分给燃烧者。
- * - 70% 权重分红：所有燃烧者按个人 burn 占比分配
- * - 30% Top10：按 burn 排名前 10 按权重分配
- *
- * 写 reward_claims，走现有 burn claim 签名领取流程。
- * source_ref = lp-dividend:{round} 防重复分发。
- */
+async function pendingReceipts(env: Env): Promise<{ rows: LpTaxReceiptRow[]; total: bigint }> {
+  const rows = await env.DB.prepare(
+    `SELECT id, amount_usdt FROM lp_tax_receipts
+      WHERE settled_round IS NULL
+      ORDER BY received_at ASC, tx_hash ASC, log_index ASC`,
+  ).all<LpTaxReceiptRow>();
+  let total = 0n;
+  for (const row of rows.results ?? []) total += BigInt(row.amount_usdt);
+  return { rows: rows.results ?? [], total };
+}
+
 export async function distributeLpDividend(
   env: Env,
-): Promise<{ round: number; amountHs: string; recipients: number; skipped: boolean }> {
+  options: { force?: boolean } = {},
+): Promise<{
+  round: number;
+  amountUsdt: string;
+  thresholdUsdt: string;
+  recipients: number;
+  skipped: boolean;
+  pendingUsdt: string;
+}> {
   const cfg = await readConfig(env);
   const now = await nowSeconds(env);
+  const pending = await pendingReceipts(env);
 
-  // 未到时间则跳过
-  if (cfg.lastAt > 0 && now < cfg.lastAt + cfg.intervalSeconds) {
-    return { round: cfg.round, amountHs: "0", recipients: 0, skipped: true };
+  if (pending.total <= 0n) {
+    return {
+      round: cfg.round,
+      amountUsdt: "0",
+      thresholdUsdt: cfg.thresholdUsdt.toString(),
+      recipients: 0,
+      skipped: true,
+      pendingUsdt: "0",
+    };
+  }
+  if (!options.force && cfg.thresholdUsdt > 0n && pending.total < cfg.thresholdUsdt) {
+    return {
+      round: cfg.round,
+      amountUsdt: "0",
+      thresholdUsdt: cfg.thresholdUsdt.toString(),
+      recipients: 0,
+      skipped: true,
+      pendingUsdt: pending.total.toString(),
+    };
   }
 
   const round = cfg.round + 1;
   const sourceRef = `lp-dividend:${round}`;
-
-  // 防重复：已存在该 source_ref 则跳过
-  const dup = await env.DB.prepare(
-    "SELECT id FROM reward_claims WHERE source_ref = ? LIMIT 1",
-  )
+  const duplicate = await env.DB.prepare("SELECT id FROM reward_claims WHERE source_ref = ? LIMIT 1")
     .bind(sourceRef)
     .first<{ id: string }>();
-  if (dup) return { round: cfg.round, amountHs: "0", recipients: 0, skipped: true };
-
-  // 取所有燃烧记录，JS 侧 BigInt 聚合（避免 D1 SUM 对大数精度丢失）
-  const rawRows = await env.DB.prepare(
-    "SELECT user, hs_amount FROM burn_records",
-  ).all<{ user: string; hs_amount: string }>();
-  if (!rawRows.results || rawRows.results.length === 0) {
-    return { round, amountHs: cfg.amountHs.toString(), recipients: 0, skipped: true };
+  if (duplicate) {
+    return {
+      round: cfg.round,
+      amountUsdt: "0",
+      thresholdUsdt: cfg.thresholdUsdt.toString(),
+      recipients: 0,
+      skipped: true,
+      pendingUsdt: pending.total.toString(),
+    };
   }
 
-  // 按用户聚合
+  const rawRows = await env.DB.prepare("SELECT user, hs_amount FROM burn_records")
+    .all<{ user: string; hs_amount: string }>();
   const burnMap = new Map<string, bigint>();
-  for (const r of rawRows.results) {
-    const u = r.user.toLowerCase();
-    burnMap.set(u, (burnMap.get(u) ?? 0n) + BigInt(r.hs_amount));
+  for (const row of rawRows.results ?? []) {
+    const user = row.user.toLowerCase();
+    burnMap.set(user, (burnMap.get(user) ?? 0n) + BigInt(row.hs_amount));
   }
 
   const out = await outUsers(env);
@@ -109,52 +140,72 @@ export async function distributeLpDividend(
     users.push({ user, burn });
     totalBurn += burn;
   }
-  if (totalBurn <= 0n || users.length === 0) {
-    return { round, amountHs: cfg.amountHs.toString(), recipients: 0, skipped: true };
+  if (users.length === 0 || totalBurn <= 0n) {
+    return {
+      round: cfg.round,
+      amountUsdt: "0",
+      thresholdUsdt: cfg.thresholdUsdt.toString(),
+      recipients: 0,
+      skipped: true,
+      pendingUsdt: pending.total.toString(),
+    };
   }
 
-  const totalAmount = cfg.amountHs;
-  const weightPool = (totalAmount * BigInt(BURN_LP_DIVIDEND_HOLDER_BPS)) / BigInt(BPS_DENOMINATOR);
-  const top10Pool = (totalAmount * BigInt(BURN_LP_DIVIDEND_TOP10_BPS)) / BigInt(BPS_DENOMINATOR);
-
+  const weightPool = (pending.total * BigInt(BURN_LP_DIVIDEND_HOLDER_BPS)) / BigInt(BPS_DENOMINATOR);
+  const top10Pool = (pending.total * BigInt(BURN_LP_DIVIDEND_TOP10_BPS)) / BigInt(BPS_DENOMINATOR);
   let recipients = 0;
 
-  // 70% 权重分红：每人按 burn 占比
-  for (const u of users) {
-    const reward = (weightPool * u.burn) / totalBurn;
+  for (const user of users) {
+    const reward = (weightPool * user.burn) / totalBurn;
     if (reward <= 0n) continue;
-    await env.DB.prepare(
-      `INSERT INTO reward_claims (id, user, kind, reward_token, reward_amount, round, source_ref, created_at)
-       VALUES (?, ?, 'lp-dividend-weight', 'HS', ?, ?, ?, ?)`,
-    )
-      .bind(ulid(), u.user, reward.toString(), round, sourceRef, now)
-      .run();
+    await addRewardClaim(env, {
+      user: user.user,
+      kind: "lp-dividend-weight",
+      token: "USDT",
+      amount: reward,
+      round,
+      sourceRef,
+      now,
+    });
     recipients++;
   }
 
-  // 30% Top10：按 burn 排名取前 10
   const top10 = [...users]
     .sort((a, b) => (a.burn === b.burn ? a.user.localeCompare(b.user) : a.burn > b.burn ? -1 : 1))
     .slice(0, 10);
   let totalTop10Burn = 0n;
-  for (const u of top10) totalTop10Burn += u.burn;
+  for (const user of top10) totalTop10Burn += user.burn;
 
   if (totalTop10Burn > 0n) {
-    for (const u of top10) {
-      const reward = (top10Pool * u.burn) / totalTop10Burn;
+    for (const user of top10) {
+      const reward = (top10Pool * user.burn) / totalTop10Burn;
       if (reward <= 0n) continue;
-      await env.DB.prepare(
-        `INSERT INTO reward_claims (id, user, kind, reward_token, reward_amount, round, source_ref, created_at)
-         VALUES (?, ?, 'lp-dividend-top10', 'HS', ?, ?, ?, ?)`,
-      )
-        .bind(ulid(), u.user, reward.toString(), round, sourceRef, now)
-        .run();
+      await addRewardClaim(env, {
+        user: user.user,
+        kind: "lp-dividend-top10",
+        token: "USDT",
+        amount: reward,
+        round,
+        sourceRef,
+        now,
+      });
       recipients++;
     }
   }
 
-  // 保存轮次元数据
+  for (const receipt of pending.rows) {
+    await env.DB.prepare("UPDATE lp_tax_receipts SET settled_round = ? WHERE id = ? AND settled_round IS NULL")
+      .bind(round, receipt.id)
+      .run();
+  }
   await saveRoundMeta(env, round, now);
 
-  return { round, amountHs: totalAmount.toString(), recipients, skipped: false };
+  return {
+    round,
+    amountUsdt: pending.total.toString(),
+    thresholdUsdt: cfg.thresholdUsdt.toString(),
+    recipients,
+    skipped: false,
+    pendingUsdt: "0",
+  };
 }

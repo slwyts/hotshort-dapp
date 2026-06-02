@@ -49,6 +49,7 @@ test.describe("stake lifecycle", () => {
 
     const claim = await apiRequest<{
       token: Address;
+      tokens?: Address[];
       recipients: Address[];
       amounts: string[];
       amount: string;
@@ -74,7 +75,7 @@ test.describe("stake lifecycle", () => {
       abi: VAULT_ABI,
       functionName: "claim",
       args: [
-        claim.token,
+        claim.tokens ?? claim.amounts.map(() => claim.token),
         claim.recipients,
         claim.amounts.map((amount) => BigInt(amount)),
         BigInt(claim.nonce),

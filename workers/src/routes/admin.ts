@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
+import type { Address } from "viem";
 import type { Env } from "../env";
 import { requireUser } from "./auth";
 import { invalidateRate } from "../lib/rates";
@@ -11,9 +12,11 @@ import { directReferralConfigKey } from "../lib/referral";
 import { importGenesisNode, normalizeAiTier } from "../lib/genesis-nodes";
 import { getTimeDebugInfo, realNowSeconds, setTimeOffset, todayBeijing, nowSeconds } from "../lib/time";
 import { distributeLpDividend } from "../lib/lp-dividend";
+import { stakeAssetWeiToUsdtWei, tokenForStakeAsset, usdtWeiToHsWei } from "../lib/pricing";
 import {
   AI_REFERRAL_DIRECT_BPS,
   AI_TIERS,
+  BPS_DENOMINATOR,
   STAKE_ASSETS,
   STAKE_LOCK_MONTHS,
   type AiTierKey,
@@ -32,6 +35,37 @@ async function requireOwner(c: Context<{ Bindings: Env }>): Promise<string | nul
   } catch {
     return null;
   }
+}
+
+function addPressure(map: Map<Address, bigint>, token: Address, amount: bigint): void {
+  if (amount <= 0n) return;
+  const normalized = token.toLowerCase() as Address;
+  map.set(normalized, (map.get(normalized) ?? 0n) + amount);
+}
+
+function rewardTokenAddress(env: Env, token: string): Address | null {
+  if (token === "HS") return env.HS_TOKEN.toLowerCase() as Address;
+  if (token === "USDT") return env.USDT_TOKEN.toLowerCase() as Address;
+  if (token === "LP") return env.PANCAKE_PAIR.toLowerCase() as Address;
+  return null;
+}
+
+function addSignaturePressure(
+  map: Map<Address, bigint>,
+  row: { token: string; amount: string; recipients_json: string | null },
+): void {
+  if (row.recipients_json) {
+    try {
+      const parsed = JSON.parse(row.recipients_json) as { tokens?: string[]; amounts?: string[] };
+      if (parsed.tokens?.length && parsed.amounts?.length && parsed.tokens.length === parsed.amounts.length) {
+        for (let i = 0; i < parsed.tokens.length; i++) {
+          addPressure(map, parsed.tokens[i].toLowerCase() as Address, BigInt(parsed.amounts[i]));
+        }
+        return;
+      }
+    } catch { /* fall back to legacy single-token signature */ }
+  }
+  addPressure(map, row.token.toLowerCase() as Address, BigInt(row.amount));
 }
 
 admin.get("/whoami", async (c) => {
@@ -299,14 +333,85 @@ admin.post("/airdrop-list", async (c) => {
 admin.get("/funds", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
-  // 应付的签名（已签出未上链消费）
+
+  const now = await nowSeconds(c.env);
+  const pending = new Map<Address, bigint>();
+  const activeNonces = new Set<string>();
+
   const pendingRows = await c.env.DB.prepare(
-    "SELECT token, amount FROM claim_signatures WHERE used_at IS NULL",
-  ).all<{ token: string; amount: string }>();
-  const pending = new Map<string, bigint>();
+    "SELECT nonce, token, amount, deadline, recipients_json FROM claim_signatures WHERE used_at IS NULL",
+  ).all<{ nonce: string; token: string; amount: string; deadline: number; recipients_json: string | null }>();
   for (const row of pendingRows.results ?? []) {
-    pending.set(row.token, (pending.get(row.token) ?? 0n) + BigInt(row.amount));
+    if (row.deadline <= now) continue;
+    activeNonces.add(row.nonce);
+    addSignaturePressure(pending, row);
   }
+
+  const stakeRows = await c.env.DB.prepare(
+    `SELECT id, asset, amount, entry_value_usdt, lock_months, monthly_rate_bps, claim_nonce
+       FROM stake_orders
+      WHERE claimed = 0 AND matures_at <= ?`,
+  )
+    .bind(now)
+    .all<{
+      id: string;
+      asset: StakeAsset;
+      amount: string;
+      entry_value_usdt: string | null;
+      lock_months: number;
+      monthly_rate_bps: number;
+      claim_nonce: string | null;
+    }>();
+  for (const row of stakeRows.results ?? []) {
+    if (row.claim_nonce && activeNonces.has(row.claim_nonce)) continue;
+    const principal = BigInt(row.amount);
+    const principalToken = tokenForStakeAsset(c.env, row.asset);
+    addPressure(pending, principalToken, principal);
+
+    let entryValueUsdt = BigInt(row.entry_value_usdt ?? "0");
+    if (entryValueUsdt <= 0n) entryValueUsdt = await stakeAssetWeiToUsdtWei(c.env, row.asset, principal);
+    const interestUsdt =
+      (entryValueUsdt * BigInt(row.monthly_rate_bps) * BigInt(row.lock_months)) /
+      BigInt(BPS_DENOMINATOR);
+    const yieldHs = await usdtWeiToHsWei(c.env, interestUsdt);
+    addPressure(pending, c.env.HS_TOKEN.toLowerCase() as Address, yieldHs);
+  }
+
+  const hsToken = c.env.HS_TOKEN.toLowerCase() as Address;
+  const lotteryRows = await c.env.DB.prepare(
+    "SELECT prize_hs, claim_nonce FROM lottery_tickets WHERE claimed = 0 AND prize_hs IS NOT NULL",
+  ).all<{ prize_hs: string | null; claim_nonce: string | null }>();
+  for (const row of lotteryRows.results ?? []) {
+    if (!row.prize_hs || (row.claim_nonce && activeNonces.has(row.claim_nonce))) continue;
+    addPressure(pending, hsToken, BigInt(row.prize_hs));
+  }
+
+  const top10Rows = await c.env.DB.prepare(
+    "SELECT reward_hs, claim_nonce FROM burn_top10_settlements WHERE claimed = 0",
+  ).all<{ reward_hs: string; claim_nonce: string | null }>();
+  for (const row of top10Rows.results ?? []) {
+    if (row.claim_nonce && activeNonces.has(row.claim_nonce)) continue;
+    addPressure(pending, hsToken, BigInt(row.reward_hs));
+  }
+
+  const rewardRows = await c.env.DB.prepare(
+    "SELECT reward_token, reward_amount, claim_nonce FROM reward_claims WHERE claimed = 0 AND reward_token IN ('HS', 'USDT', 'LP')",
+  ).all<{ reward_token: string; reward_amount: string; claim_nonce: string | null }>();
+  for (const row of rewardRows.results ?? []) {
+    if (row.claim_nonce && activeNonces.has(row.claim_nonce)) continue;
+    const token = rewardTokenAddress(c.env, row.reward_token);
+    if (token) addPressure(pending, token, BigInt(row.reward_amount));
+  }
+
+  const referralRows = await c.env.DB.prepare(
+    "SELECT reward_token, reward_amount, claim_nonce FROM referral_rewards WHERE claimed = 0 AND reward_token IN ('HS', 'USDT', 'LP')",
+  ).all<{ reward_token: string; reward_amount: string; claim_nonce: string | null }>();
+  for (const row of referralRows.results ?? []) {
+    if (row.claim_nonce && activeNonces.has(row.claim_nonce)) continue;
+    const token = rewardTokenAddress(c.env, row.reward_token);
+    if (token) addPressure(pending, token, BigInt(row.reward_amount));
+  }
+
   return c.json({ pending: [...pending.entries()].map(([token, amount]) => ({ token, pending: amount.toString() })) });
 });
 
@@ -449,6 +554,7 @@ const RESET_TABLES = [
   "burn_personal_status",
   "burn_rounds",
   "burn_records",
+  "lp_tax_receipts",
   "airdrop_list",
   "genesis_nodes",
   "referral_paths",
@@ -471,8 +577,7 @@ async function seedDefaults(env: Env, at: number): Promise<void> {
     ["lottery_weekly_refill_hs", "100000"],
     ["lottery_current_round", "1"],
     ["burn_current_round", "1"],
-    ["lp_dividend_amount_hs", "100000"],
-    ["lp_dividend_interval_seconds", "604800"],
+    ["lp_dividend_threshold_usdt", "100"],
     ["lp_dividend_last_at", "0"],
     ["lp_dividend_round", "0"],
     ["pancake_lottery_address", ""],
@@ -552,7 +657,7 @@ admin.post("/reset-db", async (c) => {
 admin.get("/lp-dividend", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
-  const keys = ["lp_dividend_amount_hs", "lp_dividend_interval_seconds", "lp_dividend_last_at", "lp_dividend_round"];
+  const keys = ["lp_dividend_threshold_usdt", "lp_dividend_last_at", "lp_dividend_round"];
   const rs = await c.env.DB.prepare(
     `SELECT key, value FROM admin_config WHERE key IN (${keys.map(() => "?").join(",")})`,
   )
@@ -561,17 +666,16 @@ admin.get("/lp-dividend", async (c) => {
   const map = new Map<string, string>();
   for (const r of rs.results ?? []) map.set(r.key, r.value);
 
-  const amountHs = map.get("lp_dividend_amount_hs") ?? "100000";
-  const intervalSeconds = Number(map.get("lp_dividend_interval_seconds") ?? "604800");
+  const thresholdUsdt = map.get("lp_dividend_threshold_usdt") ?? "100";
   const lastAt = Number(map.get("lp_dividend_last_at") ?? "0");
   const round = Number(map.get("lp_dividend_round") ?? "0");
+  const receipts = await c.env.DB.prepare(
+    "SELECT amount_usdt FROM lp_tax_receipts WHERE settled_round IS NULL",
+  ).all<{ amount_usdt: string }>();
+  let pendingUsdtWei = 0n;
+  for (const row of receipts.results ?? []) pendingUsdtWei += BigInt(row.amount_usdt);
 
-  let nextAt = 0;
-  if (intervalSeconds > 0) {
-    nextAt = (lastAt > 0 ? lastAt : realNowSeconds()) + intervalSeconds;
-  }
-
-  return c.json({ amountHs, intervalSeconds, lastAt, round, nextAt });
+  return c.json({ thresholdUsdt, pendingUsdtWei: pendingUsdtWei.toString(), lastAt, round });
 });
 
 /** POST /admin/lp-dividend  设置 LP 分红配置 */
@@ -579,13 +683,15 @@ admin.post("/lp-dividend", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
   const body = (await c.req.json().catch(() => ({}))) as {
-    amountHs?: number;
-    intervalSeconds?: number;
+    thresholdUsdt?: number | string;
   };
   const now = realNowSeconds();
   const updates: [string, string][] = [];
-  if (typeof body.amountHs === "number" && body.amountHs > 0) updates.push(["lp_dividend_amount_hs", String(body.amountHs)]);
-  if (typeof body.intervalSeconds === "number" && body.intervalSeconds >= 60) updates.push(["lp_dividend_interval_seconds", String(Math.floor(body.intervalSeconds))]);
+  if (body.thresholdUsdt !== undefined) {
+    const value = String(body.thresholdUsdt).trim();
+    if (!/^\d+(\.\d{0,18})?$/.test(value) || Number(value) <= 0) return c.json({ error: "bad payload" }, 400);
+    updates.push(["lp_dividend_threshold_usdt", value]);
+  }
   if (updates.length === 0) return c.json({ error: "bad payload" }, 400);
   for (const [k, v] of updates) {
     await c.env.DB.prepare(
@@ -602,7 +708,7 @@ admin.post("/lp-dividend/trigger", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
   try {
-    const r = await distributeLpDividend(c.env);
+    const r = await distributeLpDividend(c.env, { force: true });
     return c.json(r);
   } catch (e) {
     return c.json({ error: (e as Error).message }, 500);

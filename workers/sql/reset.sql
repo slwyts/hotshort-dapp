@@ -4,6 +4,7 @@ DROP TABLE IF EXISTS agent_accounts;
 DROP TABLE IF EXISTS airdrop_list;
 DROP TABLE IF EXISTS genesis_nodes;
 DROP TABLE IF EXISTS admin_config;
+DROP TABLE IF EXISTS lp_tax_receipts;
 DROP TABLE IF EXISTS reward_claims;
 DROP TABLE IF EXISTS burn_top10_settlements;
 DROP TABLE IF EXISTS burn_personal_status;

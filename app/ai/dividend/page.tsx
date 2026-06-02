@@ -120,6 +120,7 @@ export default function DividendPage() {
     try {
       const sig = await api.post<{
         token?: string | null;
+        tokens?: string[];
         recipients?: string[];
         amounts?: string[];
         amount: string;
@@ -137,7 +138,7 @@ export default function DividendPage() {
         abi: VAULT_ABI,
         functionName: "claim",
         args: [
-          sig.token as `0x${string}`,
+          (sig.tokens ?? sig.amounts!.map(() => sig.token!)) as `0x${string}`[],
           sig.recipients as `0x${string}`[],
           sig.amounts!.map((amount) => BigInt(amount)),
           BigInt(sig.nonce!),

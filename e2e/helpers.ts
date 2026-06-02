@@ -189,6 +189,7 @@ export async function burnHsToVault(accountInfo: TestAccount, amount: bigint, re
 
 export type VaultClaim = {
   token: Address;
+  tokens?: Address[];
   recipients: Address[];
   amounts: string[];
   nonce: string;
@@ -205,7 +206,7 @@ export async function claimFromVault(accountInfo: TestAccount, claim: VaultClaim
     abi: VAULT_ABI,
     functionName: "claim",
     args: [
-      claim.token,
+      claim.tokens ?? claim.amounts.map(() => claim.token),
       claim.recipients,
       claim.amounts.map((amount) => BigInt(amount)),
       BigInt(claim.nonce),

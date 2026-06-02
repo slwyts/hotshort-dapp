@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS stake_orders (
   user TEXT NOT NULL,
   asset TEXT NOT NULL,
   amount TEXT NOT NULL,
+  entry_value_usdt TEXT NOT NULL DEFAULT '0',
+  entry_price_json TEXT,
   lock_months INTEGER NOT NULL,
   monthly_rate_bps INTEGER NOT NULL,
   started_at INTEGER NOT NULL,
@@ -295,6 +297,19 @@ CREATE TABLE IF NOT EXISTS reward_claims (
 CREATE INDEX IF NOT EXISTS idx_reward_claims_user ON reward_claims(user, claimed);
 CREATE INDEX IF NOT EXISTS idx_reward_claims_round ON reward_claims(round, kind);
 
+-- HS 合约向 Vault 发放的 LP 持有人 USDT 分红入账
+CREATE TABLE IF NOT EXISTS lp_tax_receipts (
+  id TEXT PRIMARY KEY,
+  tx_hash TEXT NOT NULL,
+  log_index INTEGER NOT NULL,
+  amount_usdt TEXT NOT NULL,
+  block_number TEXT NOT NULL,
+  received_at INTEGER NOT NULL,
+  settled_round INTEGER,
+  UNIQUE(tx_hash, log_index)
+);
+CREATE INDEX IF NOT EXISTS idx_lp_tax_receipts_settle ON lp_tax_receipts(settled_round, received_at);
+
 -- 创世节点名单（CSV 导入 / 链上扫描）
 CREATE TABLE IF NOT EXISTS genesis_nodes (
   address TEXT PRIMARY KEY,
@@ -351,8 +366,7 @@ INSERT OR IGNORE INTO admin_config (key, value, updated_by, updated_at) VALUES
   ('lottery_weekly_refill_hs', '100000', 'init', strftime('%s','now')),
   ('lottery_current_round', '1', 'init', strftime('%s','now')),
   ('burn_current_round', '1', 'init', strftime('%s','now')),
-  ('lp_dividend_amount_hs', '100000', 'init', strftime('%s','now')),
-  ('lp_dividend_interval_seconds', '604800', 'init', strftime('%s','now')),
+  ('lp_dividend_threshold_usdt', '100', 'init', strftime('%s','now')),
   ('lp_dividend_last_at', '0', 'init', strftime('%s','now')),
   ('lp_dividend_round', '0', 'init', strftime('%s','now')),
   ('pancake_lottery_address', '', 'init', strftime('%s','now'));

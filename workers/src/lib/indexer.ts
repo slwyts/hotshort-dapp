@@ -10,6 +10,9 @@ const CLAIMED_EVENT = parseAbiItem(
 const BURNED_EVENT = parseAbiItem(
   "event Burned(address indexed user, uint256 amount, address indexed referrer)",
 );
+const TRANSFER_EVENT = parseAbiItem(
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+);
 
 const CURSOR_KEY = "indexer_last_block";
 
@@ -36,10 +39,19 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
   if (from === 0n) from = tip > 50_000n ? tip - 50_000n : 0n;
   if (from >= to) return { from, to, count: 0 };
 
-  const [deposited, claimed, burned] = await Promise.all([
+  const hsToken = env.HS_TOKEN.toLowerCase() as Address;
+  const usdtToken = env.USDT_TOKEN.toLowerCase() as Address;
+  const [deposited, claimed, burned, lpTaxTransfers] = await Promise.all([
     client.getLogs({ address: vault, event: DEPOSITED_EVENT, fromBlock: from, toBlock: to }),
     client.getLogs({ address: vault, event: CLAIMED_EVENT, fromBlock: from, toBlock: to }),
     client.getLogs({ address: vault, event: BURNED_EVENT, fromBlock: from, toBlock: to }),
+    client.getLogs({
+      address: usdtToken,
+      event: TRANSFER_EVENT,
+      args: { from: hsToken, to: vault },
+      fromBlock: from,
+      toBlock: to,
+    }),
   ]);
 
   // 确认 claim 链上消费 → 标记各业务表
@@ -74,6 +86,11 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
     if (reason === 4) {
       await env.DB.prepare(
         "UPDATE burn_top10_settlements SET claimed = 1 WHERE claim_nonce = ? AND claimed = 0",
+      )
+        .bind(nonce)
+        .run();
+      await env.DB.prepare(
+        "UPDATE reward_claims SET claimed = 1 WHERE claim_nonce = ? AND claimed = 0",
       )
         .bind(nonce)
         .run();
@@ -137,11 +154,32 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
       .run();
   }
 
+  // HS token 的 LP 持有人分红会以 USDT Transfer(HS_TOKEN -> Vault) 形式进入 Vault。
+  for (const log of lpTaxTransfers) {
+    const value = log.args.value;
+    if (!value || value <= 0n) continue;
+    const id = `lp-tax-${log.transactionHash}-${log.logIndex}`;
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO lp_tax_receipts
+         (id, tx_hash, log_index, amount_usdt, block_number, received_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        id,
+        log.transactionHash,
+        Number(log.logIndex),
+        value.toString(),
+        log.blockNumber.toString(),
+        Math.floor(Date.now() / 1000),
+      )
+      .run();
+  }
+
   await env.DB.prepare(
     "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES (?, ?, 'indexer', ?)",
   )
     .bind(CURSOR_KEY, to.toString(), Math.floor(Date.now() / 1000))
     .run();
 
-  return { from, to, count: deposited.length + claimed.length + burned.length };
+  return { from, to, count: deposited.length + claimed.length + burned.length + lpTaxTransfers.length };
 }

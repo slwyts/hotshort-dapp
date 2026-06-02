@@ -28,6 +28,7 @@ contract HotshortVaultTest is Test {
         usdt.mint(alice, 10_000 * ONE);
         hs.mint(alice, 10_000 * ONE);
         usdt.mint(address(vault), 10_000 * ONE);
+        hs.mint(address(vault), 10_000 * ONE);
     }
 
     function test_DepositPullsFundsAndEmits() public {
@@ -62,75 +63,120 @@ contract HotshortVaultTest is Test {
         uint256 nonce = 1;
         uint256 deadline = block.timestamp + 3600;
         uint8 reason = 2;
-        (address[] memory recipients, uint256[] memory amounts) = _singlePayout(alice, amount);
-        bytes memory sig = _signClaim(alice, address(usdt), recipients, amounts, nonce, deadline, reason);
+        (address[] memory tokens, address[] memory recipients, uint256[] memory amounts) = _singlePayout(address(usdt), alice, amount);
+        bytes memory sig = _signClaim(alice, tokens, recipients, amounts, nonce, deadline, reason);
 
         uint256 balBefore = usdt.balanceOf(alice);
         vm.prank(alice);
-        vault.claim(address(usdt), recipients, amounts, nonce, deadline, reason, sig);
+        vault.claim(tokens, recipients, amounts, nonce, deadline, reason, sig);
         assertEq(usdt.balanceOf(alice) - balBefore, amount);
 
         vm.prank(alice);
         vm.expectRevert(HotshortVault.NonceUsed.selector);
-        vault.claim(address(usdt), recipients, amounts, nonce, deadline, reason, sig);
+        vault.claim(tokens, recipients, amounts, nonce, deadline, reason, sig);
     }
 
     function test_ClaimWithMultipleSignedPayoutsReleasesFunds() public {
         uint256 nonce = 11;
         uint256 deadline = block.timestamp + 3600;
         uint8 reason = 1;
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdt);
+        tokens[1] = address(usdt);
         address[] memory recipients = new address[](2);
         recipients[0] = alice;
         recipients[1] = dead;
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = 950 * ONE;
         amounts[1] = 50 * ONE;
-        bytes memory sig = _signClaim(alice, address(usdt), recipients, amounts, nonce, deadline, reason);
+        bytes memory sig = _signClaim(alice, tokens, recipients, amounts, nonce, deadline, reason);
 
         uint256 userBefore = usdt.balanceOf(alice);
         uint256 deadBefore = usdt.balanceOf(dead);
         vm.prank(alice);
-        vault.claim(address(usdt), recipients, amounts, nonce, deadline, reason, sig);
+        vault.claim(tokens, recipients, amounts, nonce, deadline, reason, sig);
         assertEq(usdt.balanceOf(alice) - userBefore, 950 * ONE);
         assertEq(usdt.balanceOf(dead) - deadBefore, 50 * ONE);
+    }
+
+    function test_ClaimWithMultipleTokensReleasesFunds() public {
+        uint256 nonce = 13;
+        uint256 deadline = block.timestamp + 3600;
+        uint8 reason = 1;
+        address[] memory tokens = new address[](3);
+        tokens[0] = address(usdt);
+        tokens[1] = address(hs);
+        tokens[2] = address(hs);
+        address[] memory recipients = new address[](3);
+        recipients[0] = alice;
+        recipients[1] = alice;
+        recipients[2] = dead;
+        uint256[] memory amounts = new uint256[](3);
+        amounts[0] = 1_000 * ONE;
+        amounts[1] = 95 * ONE;
+        amounts[2] = 5 * ONE;
+        bytes memory sig = _signClaim(alice, tokens, recipients, amounts, nonce, deadline, reason);
+
+        uint256 aliceUsdtBefore = usdt.balanceOf(alice);
+        uint256 aliceHsBefore = hs.balanceOf(alice);
+        uint256 deadHsBefore = hs.balanceOf(dead);
+        vm.prank(alice);
+        vault.claim(tokens, recipients, amounts, nonce, deadline, reason, sig);
+
+        assertEq(usdt.balanceOf(alice) - aliceUsdtBefore, 1_000 * ONE);
+        assertEq(hs.balanceOf(alice) - aliceHsBefore, 95 * ONE);
+        assertEq(hs.balanceOf(dead) - deadHsBefore, 5 * ONE);
     }
 
     function test_ClaimRejectsTamperedPayouts() public {
         uint256 nonce = 12;
         uint256 deadline = block.timestamp + 3600;
         uint8 reason = 1;
-        (address[] memory recipients, uint256[] memory amounts) = _singlePayout(alice, 500 * ONE);
-        bytes memory sig = _signClaim(alice, address(usdt), recipients, amounts, nonce, deadline, reason);
+        (address[] memory tokens, address[] memory recipients, uint256[] memory amounts) = _singlePayout(address(usdt), alice, 500 * ONE);
+        bytes memory sig = _signClaim(alice, tokens, recipients, amounts, nonce, deadline, reason);
         amounts[0] = 501 * ONE;
 
         vm.prank(alice);
         vm.expectRevert(HotshortVault.BadSignature.selector);
-        vault.claim(address(usdt), recipients, amounts, nonce, deadline, reason, sig);
+        vault.claim(tokens, recipients, amounts, nonce, deadline, reason, sig);
+    }
+
+    function test_ClaimRejectsTamperedToken() public {
+        uint256 nonce = 14;
+        uint256 deadline = block.timestamp + 3600;
+        uint8 reason = 1;
+        (address[] memory tokens, address[] memory recipients, uint256[] memory amounts) = _singlePayout(address(usdt), alice, 500 * ONE);
+        bytes memory sig = _signClaim(alice, tokens, recipients, amounts, nonce, deadline, reason);
+        tokens[0] = address(hs);
+
+        vm.prank(alice);
+        vm.expectRevert(HotshortVault.BadSignature.selector);
+        vault.claim(tokens, recipients, amounts, nonce, deadline, reason, sig);
     }
 
     function test_ClaimRejectsBadSigner() public {
         uint256 amount = 500 * ONE;
         uint256 nonce = 2;
         uint256 deadline = block.timestamp + 3600;
-        (address[] memory recipients, uint256[] memory amounts) = _singlePayout(alice, amount);
-        bytes memory sig = _signClaimWithKey(0xBAD5, alice, address(usdt), recipients, amounts, nonce, deadline, 1);
+        (address[] memory tokens, address[] memory recipients, uint256[] memory amounts) = _singlePayout(address(usdt), alice, amount);
+        bytes memory sig = _signClaimWithKey(0xBAD5, alice, tokens, recipients, amounts, nonce, deadline, 1);
 
         vm.prank(alice);
         vm.expectRevert(HotshortVault.BadSignature.selector);
-        vault.claim(address(usdt), recipients, amounts, nonce, deadline, 1, sig);
+        vault.claim(tokens, recipients, amounts, nonce, deadline, 1, sig);
     }
 
     function test_ClaimRejectsExpired() public {
         uint256 amount = 100 * ONE;
         uint256 nonce = 3;
         uint256 deadline = block.timestamp + 1;
-        (address[] memory recipients, uint256[] memory amounts) = _singlePayout(alice, amount);
-        bytes memory sig = _signClaim(alice, address(usdt), recipients, amounts, nonce, deadline, 1);
+        (address[] memory tokens, address[] memory recipients, uint256[] memory amounts) = _singlePayout(address(usdt), alice, amount);
+        bytes memory sig = _signClaim(alice, tokens, recipients, amounts, nonce, deadline, 1);
 
         vm.warp(deadline + 1);
         vm.prank(alice);
         vm.expectRevert(HotshortVault.Expired.selector);
-        vault.claim(address(usdt), recipients, amounts, nonce, deadline, 1, sig);
+        vault.claim(tokens, recipients, amounts, nonce, deadline, 1, sig);
     }
 
     function test_AdminOnlyControls() public {
@@ -156,8 +202,8 @@ contract HotshortVaultTest is Test {
         uint256 amount = 100 * ONE;
         uint256 nonce = 4;
         uint256 deadline = block.timestamp + 3600;
-        (address[] memory recipients, uint256[] memory amounts) = _singlePayout(alice, amount);
-        bytes memory sig = _signClaim(alice, address(usdt), recipients, amounts, nonce, deadline, 1);
+        (address[] memory tokens, address[] memory recipients, uint256[] memory amounts) = _singlePayout(address(usdt), alice, amount);
+        bytes memory sig = _signClaim(alice, tokens, recipients, amounts, nonce, deadline, 1);
 
         vault.setPaused(true);
 
@@ -167,7 +213,7 @@ contract HotshortVaultTest is Test {
         vault.deposit(address(usdt), 1 * ONE, 1, bytes32(0));
 
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        vault.claim(address(usdt), recipients, amounts, nonce, deadline, 1, sig);
+        vault.claim(tokens, recipients, amounts, nonce, deadline, 1, sig);
 
         hs.approve(address(vault), 2 * ONE);
         vm.expectRevert(Pausable.EnforcedPause.selector);
@@ -179,6 +225,7 @@ contract HotshortVaultTest is Test {
     }
 
     function test_BurnAndSwapEmitAndPullHs() public {
+        uint256 vaultHsBefore = hs.balanceOf(address(vault));
         vm.startPrank(alice);
         hs.approve(address(vault), 100 * ONE);
 
@@ -191,7 +238,7 @@ contract HotshortVaultTest is Test {
         vault.swapHsToStock(address(hs), 30 * ONE);
         vm.stopPrank();
 
-        assertEq(hs.balanceOf(address(vault)), 80 * ONE);
+        assertEq(hs.balanceOf(address(vault)) - vaultHsBefore, 80 * ONE);
     }
 
     function test_AdminWithdrawTransfersOut() public {
@@ -201,9 +248,12 @@ contract HotshortVaultTest is Test {
     }
 
     function _singlePayout(
+        address token,
         address recipient,
         uint256 amount
-    ) internal pure returns (address[] memory recipients, uint256[] memory amounts) {
+    ) internal pure returns (address[] memory tokens, address[] memory recipients, uint256[] memory amounts) {
+        tokens = new address[](1);
+        tokens[0] = token;
         recipients = new address[](1);
         recipients[0] = recipient;
         amounts = new uint256[](1);
@@ -212,20 +262,20 @@ contract HotshortVaultTest is Test {
 
     function _signClaim(
         address user,
-        address token,
+        address[] memory tokens,
         address[] memory recipients,
         uint256[] memory amounts,
         uint256 nonce,
         uint256 deadline,
         uint8 reason
     ) internal view returns (bytes memory) {
-        return _signClaimWithKey(signerPk, user, token, recipients, amounts, nonce, deadline, reason);
+        return _signClaimWithKey(signerPk, user, tokens, recipients, amounts, nonce, deadline, reason);
     }
 
     function _signClaimWithKey(
         uint256 pk,
         address user,
-        address token,
+        address[] memory tokens,
         address[] memory recipients,
         uint256[] memory amounts,
         uint256 nonce,
@@ -233,10 +283,10 @@ contract HotshortVaultTest is Test {
         uint8 reason
     ) internal view returns (bytes memory) {
         bytes32 typeHash = keccak256(
-            "Claim(address user,address token,bytes32 payoutsHash,uint256 nonce,uint256 deadline,uint8 reason)"
+            "Claim(address user,bytes32 payoutsHash,uint256 nonce,uint256 deadline,uint8 reason)"
         );
-        bytes32 payoutsHash = keccak256(abi.encode(recipients, amounts));
-        bytes32 structHash = keccak256(abi.encode(typeHash, user, token, payoutsHash, nonce, deadline, reason));
+        bytes32 payoutsHash = keccak256(abi.encode(tokens, recipients, amounts));
+        bytes32 structHash = keccak256(abi.encode(typeHash, user, payoutsHash, nonce, deadline, reason));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", vault.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
         return abi.encodePacked(r, s, v);

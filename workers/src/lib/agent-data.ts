@@ -226,19 +226,20 @@ export async function getUserFinancialSummary(env: Env, userAddress: string): Pr
   let pendingUsdtWei = 0n;
 
   const stakeRows = await env.DB.prepare(
-    "SELECT asset, amount, lock_months, monthly_rate_bps, matures_at, claimed FROM stake_orders WHERE user = ?",
+    "SELECT asset, amount, entry_value_usdt, lock_months, monthly_rate_bps, matures_at, claimed FROM stake_orders WHERE user = ?",
   )
     .bind(user)
-    .all<{ asset: string; amount: string; lock_months: number; monthly_rate_bps: number; matures_at: number; claimed: number }>();
+    .all<{ asset: string; amount: string; entry_value_usdt: string | null; lock_months: number; monthly_rate_bps: number; matures_at: number; claimed: number }>();
   for (const row of stakeRows.results ?? []) {
     const amountWei = parseWei(row.amount);
     const principal = await stakeAssetWeiToUsdtWei(env, row.asset as StakeAsset, amountWei);
     stakeDepositUsdtWei += principal;
     if (!row.claimed) stakeUsdtWei += principal;
     if (!row.claimed && row.matures_at <= now) {
-      const yieldAssetWei = (amountWei * BigInt(row.monthly_rate_bps) * BigInt(row.lock_months)) / 10_000n;
-      const yieldUsdtWei = await stakeAssetWeiToUsdtWei(env, row.asset as StakeAsset, yieldAssetWei);
-      pendingUsdtWei += (yieldUsdtWei * 9_500n) / 10_000n;
+      let entryValueUsdt = parseWei(row.entry_value_usdt);
+      if (entryValueUsdt <= 0n) entryValueUsdt = principal;
+      const interestUsdtWei = (entryValueUsdt * BigInt(row.monthly_rate_bps) * BigInt(row.lock_months)) / 10_000n;
+      pendingUsdtWei += (interestUsdtWei * 9_500n) / 10_000n;
     }
   }
 

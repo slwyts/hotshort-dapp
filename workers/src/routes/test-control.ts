@@ -39,6 +39,7 @@ const RESET_TABLES = [
   "burn_personal_status",
   "burn_rounds",
   "burn_records",
+  "lp_tax_receipts",
   "airdrop_list",
   "genesis_nodes",
   "referral_paths",
@@ -66,6 +67,9 @@ async function seedDefaults(env: Env, at: number): Promise<void> {
     ["lottery_ticket_price_usdt", "1"],
     ["lottery_weekly_refill_hs", "100000"],
     ["burn_current_round", "1"],
+    ["lp_dividend_threshold_usdt", "100"],
+    ["lp_dividend_last_at", "0"],
+    ["lp_dividend_round", "0"],
     ["__test_now_seconds", String(at)],
   ];
 

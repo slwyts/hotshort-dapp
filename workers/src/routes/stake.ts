@@ -7,7 +7,7 @@ import { getCurrentRateBps } from "../lib/rates";
 import { nowSeconds } from "../lib/time";
 import { createClaimSignature, getExistingSignature } from "../lib/claims";
 import { deterministicNonce } from "../lib/nonce";
-import { stakeAssetYieldWeiToHsWei, tokenForStakeAsset } from "../lib/pricing";
+import { stakeAssetWeiToUsdtWei, tokenForStakeAsset, usdtWeiToHsWei } from "../lib/pricing";
 import { verifyVaultDeposit, verifyVaultClaim } from "../lib/vault-events";
 import {
   STAKE_ASSETS,
@@ -21,6 +21,20 @@ import {
 export const stake = new Hono<{ Bindings: Env }>();
 
 const DEAD_ADDRESS = "0x000000000000000000000000000000000000dEaD" as Address;
+
+function addPayout(
+  payouts: { token: Address; recipient: Address; amount: bigint }[],
+  token: Address,
+  recipient: Address,
+  amount: bigint,
+): void {
+  if (amount <= 0n) return;
+  const normalizedToken = token.toLowerCase() as Address;
+  const normalizedRecipient = recipient.toLowerCase() as Address;
+  const existing = payouts.find((p) => p.token === normalizedToken && p.recipient === normalizedRecipient);
+  if (existing) existing.amount += amount;
+  else payouts.push({ token: normalizedToken, recipient: normalizedRecipient, amount });
+}
 
 /**
  * GET /stake/rates  当前生效利率（前端表单展示用）。
@@ -89,11 +103,15 @@ stake.post("/orders", async (c) => {
 
   await upsertUser(c.env, user);
   const monthlyRateBps = await getCurrentRateBps(c.env, asset, months);
+  const entryValueUsdt = await stakeAssetWeiToUsdtWei(c.env, asset, amount);
+  if (entryValueUsdt <= 0n) return c.json({ error: "price unavailable" }, 503);
 
   const id = await createStakeOrder(c.env, {
     user,
     asset,
     amountWei: body.amountWei,
+    entryValueUsdtWei: entryValueUsdt.toString(),
+    entryPriceJson: JSON.stringify({ asset, entryValueUsdt: entryValueUsdt.toString() }),
     lockMonths: months,
     monthlyRateBps,
     sourceTxHash: body.sourceTxHash,
@@ -103,10 +121,9 @@ stake.post("/orders", async (c) => {
 });
 
 /**
- * POST /stake/claim  到期领取签名（本金+收益一并折 HS 发放）。
+ * POST /stake/claim  到期领取签名（原币本金 + HS 利息）。
  * 入参: { orderId }
- * 出参: EIP-712 签名，payouts 包含用户实收（本金折 HS + 收益折 HS - 5% 燃料）
- *       和 0xdEaD 销毁的燃料部分，一次交易完成。
+ * 出参: EIP-712 签名，payouts 包含原币本金、HS 利息实收、0xdEaD 燃料销毁。
  */
 stake.post("/claim", async (c) => {
   const user = await requireUser(c);
@@ -115,7 +132,7 @@ stake.post("/claim", async (c) => {
   if (!body.orderId) return c.json({ error: "bad orderId" }, 400);
 
   const order = await c.env.DB.prepare(
-    `SELECT id, user, asset, amount, lock_months, monthly_rate_bps, matures_at, claimed
+    `SELECT id, user, asset, amount, entry_value_usdt, lock_months, monthly_rate_bps, matures_at, claimed
        FROM stake_orders WHERE id = ? AND user = ?`,
   )
     .bind(body.orderId, user)
@@ -124,6 +141,7 @@ stake.post("/claim", async (c) => {
       user: string;
       asset: string;
       amount: string;
+      entry_value_usdt: string | null;
       lock_months: number;
       monthly_rate_bps: number;
       matures_at: number;
@@ -144,36 +162,36 @@ stake.post("/claim", async (c) => {
   if (existing) return c.json(existing);
 
   const principal = BigInt(order.amount);
+  let entryValueUsdt = BigInt(order.entry_value_usdt ?? "0");
+  if (entryValueUsdt <= 0n) {
+    entryValueUsdt = await stakeAssetWeiToUsdtWei(c.env, order.asset as StakeAsset, principal);
+    if (entryValueUsdt <= 0n) return c.json({ error: "entry price unavailable" }, 503);
+  }
 
-  // 收益（本位）= 本金 × 月利率 × 月数
-  const yieldAsset =
-    (principal * BigInt(order.monthly_rate_bps) * BigInt(order.lock_months)) /
+  // 利息的本位价值 = 质押时本金 USDT 价值 × 月利率 × 月数
+  const interestUsdt =
+    (entryValueUsdt * BigInt(order.monthly_rate_bps) * BigInt(order.lock_months)) /
     BigInt(BPS_DENOMINATOR);
 
-  // 收益折 HS
-  const yieldHs = await stakeAssetYieldWeiToHsWei(c.env, order.asset as StakeAsset, yieldAsset);
+  // 利息按签发时 HS/USDT 折 HS
+  const yieldHs = await usdtWeiToHsWei(c.env, interestUsdt);
   if (yieldHs <= 0n) return c.json({ error: "yield unavailable" }, 503);
-
-  // 本金折 HS
-  const principalHs = await stakeAssetYieldWeiToHsWei(c.env, order.asset as StakeAsset, principal);
-  if (principalHs <= 0n) return c.json({ error: "principal price unavailable" }, 503);
 
   // 5% 燃料仅对收益部分扣
   const fuelHs = (yieldHs * BigInt(STAKE_FUEL_BURN_BPS)) / BigInt(BPS_DENOMINATOR);
-  const userHs = principalHs + yieldHs - fuelHs;
+  const userHs = yieldHs - fuelHs;
 
   const hsToken = c.env.HS_TOKEN.toLowerCase() as Address;
+  const principalToken = tokenForStakeAsset(c.env, order.asset as StakeAsset);
   const reason = 1; // STAKE_YIELD
+  const payouts: { token: Address; recipient: Address; amount: bigint }[] = [];
+  addPayout(payouts, principalToken, user as Address, principal);
+  addPayout(payouts, hsToken, user as Address, userHs);
+  addPayout(payouts, hsToken, DEAD_ADDRESS, fuelHs);
 
   const claim = await createClaimSignature(c.env, {
     user: user as Address,
-    token: hsToken,
-    payouts: fuelHs > 0n
-      ? [
-        { recipient: user as Address, amount: userHs },
-        { recipient: DEAD_ADDRESS, amount: fuelHs },
-      ]
-      : [{ recipient: user as Address, amount: userHs }],
+    payouts,
     reason,
     now,
     nonce,
@@ -186,11 +204,14 @@ stake.post("/claim", async (c) => {
 
   return c.json({
     ...claim,
+    principalToken,
+    principalAmount: principal.toString(),
     claimableHs: userHs.toString(),
     fuelBurnHs: fuelHs.toString(),
     yieldHs: yieldHs.toString(),
-    principalHs: principalHs.toString(),
-    yieldAssetAmount: yieldAsset.toString(),
+    interestUsdt: interestUsdt.toString(),
+    entryValueUsdt: entryValueUsdt.toString(),
+    yieldAssetAmount: interestUsdt.toString(),
     yieldAsset: order.asset,
   });
 });
@@ -217,7 +238,6 @@ stake.post("/confirm", async (c) => {
   await verifyVaultClaim(c.env, {
     txHash: body.txHash as Hex,
     user: user as Address,
-    token: c.env.HS_TOKEN.toLowerCase() as Address,
     reason: 1,
     nonce: expectedNonce,
   });

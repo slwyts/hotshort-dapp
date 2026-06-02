@@ -34,6 +34,7 @@ interface OwnerResp {
 
 interface ClaimSig {
   token?: string | null;
+  tokens?: string[];
   recipients?: string[];
   amounts?: string[];
   amount: string;
@@ -170,7 +171,7 @@ export function TeamSection() {
       abi: VAULT_ABI,
       functionName: "claim",
       args: [
-        sig.token as `0x${string}`,
+        (sig.tokens ?? sig.amounts.map(() => sig.token!)) as `0x${string}`[],
         sig.recipients as `0x${string}`[],
         sig.amounts.map((amount) => BigInt(amount)),
         BigInt(sig.nonce),

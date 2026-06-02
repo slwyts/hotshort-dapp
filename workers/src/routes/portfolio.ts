@@ -117,18 +117,19 @@ portfolio.get("/", async (c) => {
   // 4) 待领明细
   // 4a) 质押到期未领 — 收益部分（不含本金，本金在 1）
   const stakeMatured = await c.env.DB.prepare(
-    `SELECT asset, amount, monthly_rate_bps, lock_months
+    `SELECT asset, amount, entry_value_usdt, monthly_rate_bps, lock_months
      FROM stake_orders
      WHERE user = ? AND claimed = 0 AND matures_at <= ?`,
   )
     .bind(user, await nowSeconds(c.env))
-    .all<{ asset: string; amount: string; monthly_rate_bps: number; lock_months: number }>();
+    .all<{ asset: string; amount: string; entry_value_usdt: string | null; monthly_rate_bps: number; lock_months: number }>();
   let stakePendingUsdt = 0;
   for (const o of stakeMatured.results ?? []) {
     if (o.asset !== "USDT" && o.asset !== "HS" && o.asset !== "LP") continue;
-    const yieldAssetWei = (parseWei(o.amount) * BigInt(o.monthly_rate_bps) * BigInt(o.lock_months)) / 10_000n;
-    const yieldUsdtWei = await stakeAssetWeiToUsdtWei(c.env, o.asset as StakeAsset, yieldAssetWei);
-    stakePendingUsdt += weiToNumber((yieldUsdtWei * 9_500n) / 10_000n); // 95% 给用户，5% 燃烧
+    let entryValueUsdt = parseWei(o.entry_value_usdt);
+    if (entryValueUsdt <= 0n) entryValueUsdt = await stakeAssetWeiToUsdtWei(c.env, o.asset as StakeAsset, parseWei(o.amount));
+    const interestUsdtWei = (entryValueUsdt * BigInt(o.monthly_rate_bps) * BigInt(o.lock_months)) / 10_000n;
+    stakePendingUsdt += weiToNumber((interestUsdtWei * 9_500n) / 10_000n); // 95% 给用户，5% 燃烧
   }
 
   // 4b) 彩票中奖未领（HS）

@@ -188,6 +188,7 @@ export default function BurnPage() {
       Swal.fire({ title: t("burn.claim.preparing"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const sig = await api.post<{
         token?: string;
+        tokens?: string[];
         recipients?: string[];
         amounts?: string[];
         amount: string;
@@ -206,7 +207,7 @@ export default function BurnPage() {
         abi: VAULT_ABI,
         functionName: "claim",
         args: [
-          sig.token as `0x${string}`,
+          (sig.tokens ?? sig.amounts!.map(() => sig.token!)) as `0x${string}`[],
           sig.recipients as `0x${string}`[],
           sig.amounts!.map((amount) => BigInt(amount)),
           BigInt(sig.nonce!),
@@ -238,6 +239,7 @@ export default function BurnPage() {
       Swal.fire({ title: t("burn.personalClaim.preparing"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const sig = await api.post<{
         token?: string;
+        tokens?: string[];
         recipients?: string[];
         amounts?: string[];
         amount: string;
@@ -256,7 +258,7 @@ export default function BurnPage() {
         abi: VAULT_ABI,
         functionName: "claim",
         args: [
-          sig.token as `0x${string}`,
+          (sig.tokens ?? sig.amounts!.map(() => sig.token!)) as `0x${string}`[],
           sig.recipients as `0x${string}`[],
           sig.amounts!.map((amount) => BigInt(amount)),
           BigInt(sig.nonce!),

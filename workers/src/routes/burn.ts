@@ -5,9 +5,9 @@ import { requireUser } from "./auth";
 import { upsertUser, requireBoundUser } from "../lib/users";
 import { ulid } from "../lib/ulid";
 import { nowSeconds } from "../lib/time";
-import { createClaimSignature, getExistingSignature } from "../lib/claims";
+import { createClaimSignature, getExistingSignature, getExistingSignatureForUserReason } from "../lib/claims";
 import { deterministicNonce } from "../lib/nonce";
-import { markRewardRowsClaimed, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
+import { markRewardRowsSigned, type RewardClaimRow } from "../lib/reward-claims";
 import { readTokenBalance } from "../lib/token-balance";
 import { verifyVaultBurn, verifyVaultClaim } from "../lib/vault-events";
 import { hsWeiToUsdtWei } from "../lib/pricing";
@@ -19,6 +19,18 @@ import {
 } from "@/lib/constants/business-rules";
 
 export const burn = new Hono<{ Bindings: Env }>();
+
+function rewardTokenAddress(env: Env, token: string): Address | null {
+  if (token === "HS") return env.HS_TOKEN.toLowerCase() as Address;
+  if (token === "USDT") return env.USDT_TOKEN.toLowerCase() as Address;
+  return null;
+}
+
+function addTokenTotal(map: Map<Address, bigint>, token: Address, amount: bigint): void {
+  if (amount <= 0n) return;
+  const normalized = token.toLowerCase() as Address;
+  map.set(normalized, (map.get(normalized) ?? 0n) + amount);
+}
 
 async function getCurrentBurnRound(env: Env): Promise<number> {
   const row = await env.DB.prepare("SELECT value FROM admin_config WHERE key = 'burn_current_round'").first<{ value: string }>();
@@ -291,6 +303,11 @@ burn.post("/claim/top10", async (c) => {
   if (!user) return c.json({ error: "unauthorized" }, 401);
   const status = await ensurePersonalRow(c.env, user);
   const out = !!status.out;
+  const now = await nowSeconds(c.env);
+  const reason = 4;
+
+  const existing = await getExistingSignatureForUserReason(c.env, user as Address, reason, now);
+  if (existing) return c.json(existing);
 
   const rows = out
     ? { results: [] as { id: string; reward_hs: string }[] }
@@ -300,18 +317,22 @@ burn.post("/claim/top10", async (c) => {
       .bind(user)
       .all<{ id: string; reward_hs: string }>();
 
-  let total = 0n;
-  for (const r of rows.results ?? []) total += BigInt(r.reward_hs);
+  const hsToken = c.env.HS_TOKEN.toLowerCase() as Address;
+  const totals = new Map<Address, bigint>();
+  for (const r of rows.results ?? []) addTokenTotal(totals, hsToken, BigInt(r.reward_hs));
 
   const rewardRows = await c.env.DB.prepare(
     `SELECT id, user, kind, reward_token, reward_amount, round, source_ref
        FROM reward_claims
-      WHERE user = ? AND claimed = 0 AND reward_token = 'HS'
+      WHERE user = ? AND claimed = 0 AND reward_token IN ('HS', 'USDT')
         AND kind IN (${out ? "'burn-weight'" : "'burn-weight', 'stake-burn-dividend', 'ai-burn-airdrop', 'lp-dividend-weight', 'lp-dividend-top10'"})`,
   )
     .bind(user)
     .all<RewardClaimRow>();
-  total += sumRewardRows(rewardRows.results ?? []);
+  for (const row of rewardRows.results ?? []) {
+    const token = rewardTokenAddress(c.env, row.reward_token);
+    if (token) addTokenTotal(totals, token, BigInt(row.reward_amount));
+  }
 
   const referralRows = out
     ? { results: [] as { id: string; reward_amount: string }[] }
@@ -320,36 +341,39 @@ burn.post("/claim/top10", async (c) => {
     )
       .bind(user)
       .all<{ id: string; reward_amount: string }>();
-  for (const row of referralRows.results ?? []) total += BigInt(row.reward_amount);
+  for (const row of referralRows.results ?? []) addTokenTotal(totals, hsToken, BigInt(row.reward_amount));
 
+  let total = 0n;
+  for (const amount of totals.values()) total += amount;
   if (total <= 0n) return c.json({ amount: "0" });
 
-  const hsToken = c.env.HS_TOKEN.toLowerCase() as Address;
-  const reason = 4; // BURN_DIVIDEND
-  const nonce = deterministicNonce("burn-top10", user);
-  const now = await nowSeconds(c.env);
-
-  // 已有有效签名 → 直接返回
-  const existing = await getExistingSignature(c.env, nonce, now);
-  if (existing) return c.json({ ...existing, top10Rows: rows.results?.length ?? 0, rewardRows: rewardRows.results?.length ?? 0, referralRows: referralRows.results?.length ?? 0 });
+  const batchIds = [
+    ...(rows.results ?? []).map((row) => `top10:${row.id}`),
+    ...(rewardRows.results ?? []).map((row) => `reward:${row.id}`),
+    ...(referralRows.results ?? []).map((row) => `ref:${row.id}`),
+  ].sort();
+  const nonce = deterministicNonce("burn-top10", `${user}:${batchIds.join("|")}`);
 
   const claim = await createClaimSignature(c.env, {
     user: user as Address,
-    token: hsToken,
-    payouts: [{ recipient: user as Address, amount: total }],
+    payouts: [...totals.entries()].map(([token, amount]) => ({ token, recipient: user as Address, amount })),
     reason,
+    now,
     nonce,
   });
 
-  // 记录 nonce 到各表以便索引器/confirm 回写，标记已发签名
   const nonceStr = claim.nonce;
-  await c.env.DB.prepare("UPDATE burn_top10_settlements SET claimed = 1, claim_nonce = ? WHERE user = ? AND claimed = 0")
-    .bind(nonceStr, user)
-    .run();
-  await markRewardRowsClaimed(c.env, rewardRows.results ?? [], nonceStr);
-  await c.env.DB.prepare("UPDATE referral_rewards SET claimed = 1, claim_nonce = ? WHERE user = ? AND claimed = 0 AND reward_token = 'HS' AND kind IN ('burn-gen1', 'burn-gen2')")
-    .bind(nonceStr, user)
-    .run();
+  for (const row of rows.results ?? []) {
+    await c.env.DB.prepare("UPDATE burn_top10_settlements SET claim_nonce = ? WHERE id = ? AND claimed = 0")
+      .bind(nonceStr, row.id)
+      .run();
+  }
+  await markRewardRowsSigned(c.env, rewardRows.results ?? [], nonceStr);
+  for (const row of referralRows.results ?? []) {
+    await c.env.DB.prepare("UPDATE referral_rewards SET claim_nonce = ? WHERE id = ? AND claimed = 0")
+      .bind(nonceStr, row.id)
+      .run();
+  }
 
   return c.json({
     ...claim,
