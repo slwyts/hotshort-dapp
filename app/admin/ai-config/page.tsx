@@ -19,18 +19,93 @@ interface AiCfg {
   directReferralBps: Record<AiTierKey, number>;
 }
 
+interface AiCfgDraft {
+  volumeMin: string;
+  volumeMax: string;
+  ratioPercent: string;
+  directReferralPercent: Record<AiTierKey, string>;
+}
+
 function defaultDirectReferralBps(): Record<AiTierKey, number> {
   return { ...AI_REFERRAL_DIRECT_BPS };
 }
 
+function normalizeIntegerInput(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits.replace(/^0+(?=\d)/, "");
+}
+
+function normalizePercentInput(value: string) {
+  const cleaned = value.replace(/[^\d.]/g, "");
+  const dotIndex = cleaned.indexOf(".");
+  const integerPart = dotIndex === -1 ? cleaned : cleaned.slice(0, dotIndex);
+  const decimalPart = dotIndex === -1 ? "" : cleaned.slice(dotIndex + 1).replace(/\./g, "").slice(0, 2);
+  const integer = integerPart.replace(/^0+(?=\d)/, "");
+
+  if (dotIndex !== -1) return `${integer || "0"}.${decimalPart}`;
+  return integer;
+}
+
+function formatPercentFromBps(bps: number) {
+  return (bps / 100).toFixed(2);
+}
+
+function parseIntegerDraft(value: string) {
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function parsePercentDraft(value: string) {
+  if (!/^\d+(?:\.\d{0,2})?$/.test(value)) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed * 100);
+}
+
+function configToDraft(cfg: AiCfg): AiCfgDraft {
+  const directReferralPercent = AI_TIERS.reduce((acc, tier) => {
+    acc[tier.key] = formatPercentFromBps(cfg.directReferralBps[tier.key] ?? AI_REFERRAL_DIRECT_BPS[tier.key]);
+    return acc;
+  }, {} as Record<AiTierKey, string>);
+
+  return {
+    volumeMin: String(cfg.volumeMin),
+    volumeMax: String(cfg.volumeMax),
+    ratioPercent: formatPercentFromBps(cfg.ratioBps),
+    directReferralPercent,
+  };
+}
+
+function draftToConfig(draft: AiCfgDraft) {
+  const volumeMin = parseIntegerDraft(draft.volumeMin);
+  const volumeMax = parseIntegerDraft(draft.volumeMax);
+  const ratioBps = parsePercentDraft(draft.ratioPercent);
+  if (volumeMin === null || volumeMax === null || ratioBps === null) return null;
+
+  const directReferralBps = AI_TIERS.reduce((acc, tier) => {
+    acc[tier.key] = tier.key === "pioneer" ? 0 : parsePercentDraft(draft.directReferralPercent[tier.key] ?? "");
+    return acc;
+  }, {} as Record<AiTierKey, number | null>);
+  if (AI_TIERS.some((tier) => directReferralBps[tier.key] === null)) return null;
+
+  return {
+    volumeMin,
+    volumeMax,
+    ratioBps,
+    directReferralBps: directReferralBps as Record<AiTierKey, number>,
+  };
+}
+
 export default function AdminAiConfigPage() {
   const { jwt, signIn } = useSiweJwt();
-  const [cfg, setCfg] = useState<AiCfg>({
+  const initialCfg: AiCfg = {
     volumeMin: 100_000,
     volumeMax: 200_000,
     ratioBps: 100,
     directReferralBps: defaultDirectReferralBps(),
-  });
+  };
+  const [draft, setDraft] = useState<AiCfgDraft>(() => configToDraft(initialCfg));
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -38,7 +113,8 @@ export default function AdminAiConfigPage() {
     setLoading(true);
     try {
       const r = await api.get<AiCfg>(endpoints.adminAiConfig);
-      setCfg({ ...r, directReferralBps: { ...defaultDirectReferralBps(), ...(r.directReferralBps ?? {}) } });
+      const nextCfg = { ...r, directReferralBps: { ...defaultDirectReferralBps(), ...(r.directReferralBps ?? {}) } };
+      setDraft(configToDraft(nextCfg));
     } catch {
       /* 使用默认值 */
     } finally {
@@ -53,17 +129,23 @@ export default function AdminAiConfigPage() {
   const save = async () => {
     const token = jwt ?? (await signIn());
     if (!token) return;
+    const nextCfg = draftToConfig(draft);
+    if (!nextCfg) {
+      await Swal.fire({ icon: "warning", title: "参数无效", text: "请检查区间和比例设置", background: "#141419", color: "#fff" });
+      return;
+    }
     const badDirectRate = AI_TIERS.some((tier) => {
-      const bps = cfg.directReferralBps[tier.key];
+      const bps = nextCfg.directReferralBps[tier.key];
       return tier.key !== "pioneer" && (!Number.isInteger(bps) || bps < 0 || bps > 10_000);
     });
-    if (cfg.volumeMin <= 0 || cfg.volumeMax < cfg.volumeMin || cfg.ratioBps < 0 || badDirectRate) {
+    if (nextCfg.volumeMin <= 0 || nextCfg.volumeMax < nextCfg.volumeMin || nextCfg.ratioBps < 0 || badDirectRate) {
       await Swal.fire({ icon: "warning", title: "参数无效", text: "请检查区间和比例设置", background: "#141419", color: "#fff" });
       return;
     }
     setSaving(true);
     try {
-      await api.post(endpoints.adminAiConfig, cfg, token);
+      await api.post(endpoints.adminAiConfig, nextCfg, token);
+      setDraft(configToDraft(nextCfg));
       await Swal.fire({ icon: "success", title: "保存成功", background: "#141419", color: "#fff", confirmButtonColor: "#b829ff" });
     } catch (e) {
       await Swal.fire({ icon: "error", title: "保存失败", text: (e as Error).message, background: "#141419", color: "#fff" });
@@ -72,8 +154,10 @@ export default function AdminAiConfigPage() {
     }
   };
 
-  const ratioPercent = cfg.ratioBps / 100;
-  const dailyExample = ((cfg.volumeMin + cfg.volumeMax) / 2) * (cfg.ratioBps / 10_000);
+  const draftVolumeMin = parseIntegerDraft(draft.volumeMin) ?? 0;
+  const draftVolumeMax = parseIntegerDraft(draft.volumeMax) ?? 0;
+  const draftRatioBps = parsePercentDraft(draft.ratioPercent) ?? 0;
+  const dailyExample = ((draftVolumeMin + draftVolumeMax) / 2) * (draftRatioBps / 10_000);
 
   return (
     <AdminGuard>
@@ -102,10 +186,10 @@ export default function AdminAiConfigPage() {
                     <label className="text-sm font-medium text-white/70">交易额下限</label>
                     <div className="mt-1 flex items-center gap-2">
                       <Input
-                        type="number"
-                        min={0}
-                        value={cfg.volumeMin}
-                        onChange={(e) => setCfg({ ...cfg, volumeMin: Number(e.target.value) })}
+                        type="text"
+                        inputMode="numeric"
+                        value={draft.volumeMin}
+                        onChange={(e) => setDraft({ ...draft, volumeMin: normalizeIntegerInput(e.target.value) })}
                       />
                       <span className="text-sm text-white/40">USDT</span>
                     </div>
@@ -114,10 +198,10 @@ export default function AdminAiConfigPage() {
                     <label className="text-sm font-medium text-white/70">交易额上限</label>
                     <div className="mt-1 flex items-center gap-2">
                       <Input
-                        type="number"
-                        min={0}
-                        value={cfg.volumeMax}
-                        onChange={(e) => setCfg({ ...cfg, volumeMax: Number(e.target.value) })}
+                        type="text"
+                        inputMode="numeric"
+                        value={draft.volumeMax}
+                        onChange={(e) => setDraft({ ...draft, volumeMax: normalizeIntegerInput(e.target.value) })}
                       />
                       <span className="text-sm text-white/40">USDT</span>
                     </div>
@@ -127,12 +211,14 @@ export default function AdminAiConfigPage() {
                   <label className="text-sm font-medium text-white/70">分红比例</label>
                   <div className="mt-1 flex items-center gap-2">
                     <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step="0.01"
-                      value={ratioPercent.toFixed(2)}
-                      onChange={(e) => setCfg({ ...cfg, ratioBps: Math.round(Number(e.target.value) * 100) })}
+                      type="text"
+                      inputMode="decimal"
+                      value={draft.ratioPercent}
+                      onChange={(e) => setDraft({ ...draft, ratioPercent: normalizePercentInput(e.target.value) })}
+                      onBlur={() => {
+                        const ratioBps = parsePercentDraft(draft.ratioPercent);
+                        if (ratioBps !== null) setDraft({ ...draft, ratioPercent: formatPercentFromBps(ratioBps) });
+                      }}
                     />
                     <span className="text-sm text-white/40">%</span>
                   </div>
@@ -149,26 +235,36 @@ export default function AdminAiConfigPage() {
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     {AI_TIERS.map((tier) => {
                       const disabled = tier.key === "pioneer";
-                      const percent = (cfg.directReferralBps[tier.key] ?? 0) / 100;
                       return (
                         <div key={tier.key}>
                           <label className="text-xs font-medium text-white/60">{tier.label} {tier.usdt}U</label>
                           <div className="mt-1 flex items-center gap-2">
                             <Input
-                              type="number"
-                              min={0}
-                              max={disabled ? 0 : 100}
-                              step="0.01"
+                              type="text"
+                              inputMode="decimal"
                               disabled={disabled}
-                              value={percent.toFixed(2)}
-                              onChange={(e) => setCfg({
-                                ...cfg,
-                                directReferralBps: {
-                                  ...cfg.directReferralBps,
-                                  [tier.key]: Math.round(Number(e.target.value) * 100),
-                                  pioneer: 0,
+                              value={draft.directReferralPercent[tier.key] ?? "0.00"}
+                              onChange={(e) => setDraft({
+                                ...draft,
+                                directReferralPercent: {
+                                  ...draft.directReferralPercent,
+                                  [tier.key]: normalizePercentInput(e.target.value),
+                                  pioneer: "0.00",
                                 },
                               })}
+                              onBlur={() => {
+                                const bps = parsePercentDraft(draft.directReferralPercent[tier.key] ?? "");
+                                if (bps !== null) {
+                                  setDraft({
+                                    ...draft,
+                                    directReferralPercent: {
+                                      ...draft.directReferralPercent,
+                                      [tier.key]: formatPercentFromBps(bps),
+                                      pioneer: "0.00",
+                                    },
+                                  });
+                                }
+                              }}
                             />
                             <span className="text-sm text-white/40">%</span>
                           </div>
