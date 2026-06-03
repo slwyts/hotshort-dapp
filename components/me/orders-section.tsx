@@ -68,17 +68,19 @@ interface TicketOrder {
 interface BurnMe {
   totalBurnedHs: string;
   totalBurnedUsdt: string;
-  personalClaimedHs: string;
-  personalClaimableHs: string;
+  personalClaimedUsdt: string;
+  personalClaimableUsdt: string;
   personalClaimed: boolean;
   out: boolean;
-  top10PendingHs: string;
+  burnPendingUsdt: string;
+  burnPendingHs: string;
   pendingBreakdown?: {
-    top10Hs: string;
-    weightHs: string;
-    promotionHs: string;
-    stakeHs: string;
+    top10Usdt: string;
+    weightUsdt: string;
+    promotionUsdt: string;
+    stakeUsdt: string;
     aiHs: string;
+    lpDividendUsdt?: string;
   };
 }
 
@@ -86,19 +88,21 @@ interface BurnRound {
   round: number;
   current: {
     totalBurnHs: string;
-    weightPoolHs: string;
-    promotionPoolHs: string;
-    stakePoolHs: string;
-    aiPoolHs: string;
-    top10PoolHs: string;
-    blackHoleHs: string;
-    top10CarryoverHs: string;
+    totalBurnUsdt: string;
+    weightPoolUsdt: string;
+    promotionPoolUsdt: string;
+    stakePoolUsdt: string;
+    aiPoolUsdt: string;
+    top10PoolUsdt: string;
+    blackHoleUsdt: string;
+    top10CarryoverUsdt: string;
   };
 }
 
 interface BurnRecord {
   id: string;
   hs_amount: string;
+  usdt_value: string;
   settled_round: number | null;
   claimed_individual: number;
   burned_at: number;
@@ -134,6 +138,23 @@ function weiToNumber(value: string | null | undefined): number {
   }
 }
 
+function formatClaimAssetSummary(amounts: string[], tokens: string[], contracts: { usdtToken: string; hsToken: string }): string {
+  const totals = new Map<string, bigint>();
+  for (let index = 0; index < amounts.length; index++) {
+    const token = tokens[index]?.toLowerCase();
+    if (!token) continue;
+    totals.set(token, (totals.get(token) ?? 0n) + BigInt(amounts[index]));
+  }
+  const labels = new Map<string, string>([
+    [contracts.usdtToken.toLowerCase(), "USDT"],
+    [contracts.hsToken.toLowerCase(), "HS"],
+  ]);
+  const parts = [...totals.entries()]
+    .filter(([, amount]) => amount > 0n)
+    .map(([token, amount]) => `${formatNumber(Number(formatUnits(amount, 18)), 2)} ${labels.get(token) ?? shortenAddress(token)}`);
+  return parts.length > 0 ? parts.join(" + ") : "0 USDT";
+}
+
 function dateText(seconds: number | null | undefined): string {
   if (!seconds) return "—";
   return new Date(seconds * 1000).toLocaleDateString("zh-CN");
@@ -152,7 +173,7 @@ export function OrdersSection() {
   const pathname = usePathname();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
-  const { vault } = useContracts();
+  const { vault, usdtToken, hsToken } = useContracts();
   const activeType = (ORDER_TYPES.some((item) => item.key === search.get("type")) ? search.get("type") : "stake") as OrderType;
 
   const [stake, setStake] = useState<StakeOrder[]>([]);
@@ -297,10 +318,12 @@ export function OrdersSection() {
       }
       Swal.fire({ title: t("burn.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const txHash = await sendVaultClaim(sig);
+      const claimTokens = sig.tokens ?? sig.amounts!.map(() => sig.token!);
+      const claimedAssets = formatClaimAssetSummary(sig.amounts!, claimTokens, { usdtToken, hsToken });
       await Swal.fire({
         icon: "success",
         title: t("burn.claim.success.title"),
-        html: `${t("burn.claim.success.body", { amount: formatNumber(weiToNumber(sig.amount), 2) })}<br/><span class="text-xs text-white/50">${displayTx(txHash)}</span>`,
+        html: `${t("burn.claim.success.body", { amount: claimedAssets })}<br/><span class="text-xs text-white/50">${displayTx(txHash)}</span>`,
         background: "#141419",
         color: "#fff",
         confirmButtonColor: "#b829ff",
@@ -572,27 +595,29 @@ function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming
   claimPersonalBurn: () => void;
   claiming: string | null;
 }) {
-  const pending = weiToNumber(me?.top10PendingHs);
-  const personalClaimable = weiToNumber(me?.personalClaimableHs);
+  const pending = weiToNumber(me?.burnPendingUsdt);
+  const pendingHs = weiToNumber(me?.burnPendingHs);
+  const personalClaimable = weiToNumber(me?.personalClaimableUsdt);
   const breakdown = me?.pendingBreakdown;
   return (
     <div className="space-y-3">
-      <Card className={pending > 0 ? "border-[#b829ff]/40 bg-[#b829ff]/5" : undefined}>
+      <Card className={pending > 0 || pendingHs > 0 ? "border-[#b829ff]/40 bg-[#b829ff]/5" : undefined}>
         <CardContent className="space-y-3 py-4">
           <div className="grid grid-cols-2 gap-2">
             <DetailRow label="累计燃烧" value={`${formatNumber(weiToNumber(me?.totalBurnedHs), 2)} HS`} />
-            <DetailRow label="个人权益" value={me?.out || me?.personalClaimed ? "已领取，权重分红" : `${formatNumber(personalClaimable, 2)} HS`} />
-            <DetailRow label="每周奖励" value={`${formatNumber(pending, 2)} HS`} />
+            <DetailRow label="燃烧价值" value={`${formatNumber(weiToNumber(me?.totalBurnedUsdt), 2)} USDT`} />
+            <DetailRow label="个人权益" value={me?.out || me?.personalClaimed ? "已领取，权重分红" : `${formatNumber(personalClaimable, 2)} USDT`} />
+            <DetailRow label="每周奖励" value={`${formatNumber(pending, 2)} USDT`} />
             <DetailRow label="本周总燃烧" value={`${formatNumber(weiToNumber(round?.current.totalBurnHs), 2)} HS`} />
-            <DetailRow label="Top10 周池" value={`${formatNumber(weiToNumber(round?.current.top10PoolHs), 2)} HS`} />
+            <DetailRow label="Top10 周池" value={`${formatNumber(weiToNumber(round?.current.top10PoolUsdt), 2)} USDT`} />
           </div>
           {breakdown && (
             <div className="grid grid-cols-3 gap-1.5 text-center text-xs">
-              <Mini label="Top10" value={breakdown.top10Hs} />
-              <Mini label="权重" value={breakdown.weightHs} />
-              <Mini label="推广" value={breakdown.promotionHs} />
-              <Mini label="质押" value={breakdown.stakeHs} />
-              <Mini label="AI" value={breakdown.aiHs} />
+              <Mini label="Top10" value={breakdown.top10Usdt} unit="USDT" />
+              <Mini label="权重" value={breakdown.weightUsdt} unit="USDT" />
+              <Mini label="推广" value={breakdown.promotionUsdt} unit="USDT" />
+              <Mini label="质押" value={breakdown.stakeUsdt} unit="USDT" />
+              <Mini label="AI" value={breakdown.aiHs} unit="HS" />
             </div>
           )}
           {personalClaimable > 0 && !me?.out && !me?.personalClaimed && (
@@ -600,7 +625,7 @@ function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming
               {claiming === "burn-personal" ? <Loader2 className="h-4 w-4 animate-spin" /> : "领取个人燃烧权益"}
             </Button>
           )}
-          {pending > 0 && <Button onClick={claimBurn} disabled={claiming === "burn"} className="w-full">{claiming === "burn" ? <Loader2 className="h-4 w-4 animate-spin" /> : "领取燃烧奖励"}</Button>}
+          {(pending > 0 || pendingHs > 0) && <Button onClick={claimBurn} disabled={claiming === "burn"} className="w-full">{claiming === "burn" ? <Loader2 className="h-4 w-4 animate-spin" /> : "领取燃烧奖励"}</Button>}
         </CardContent>
       </Card>
       {records.length === 0 ? <EmptyState href="/burn" text="还没有燃烧记录" /> : records.map((record) => (
@@ -608,7 +633,7 @@ function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming
           <CardContent className="flex items-center justify-between py-3 text-sm">
             <div>
               <div className="font-bold">{formatNumber(weiToNumber(record.hs_amount), 2)} HS</div>
-              <div className="mt-0.5 text-[11px] text-white/45">{dateText(record.burned_at)} · {record.settled_round ? `已结算 #${record.settled_round}` : "待周结算"}</div>
+              <div className="mt-0.5 text-[11px] text-white/45">约 {formatNumber(weiToNumber(record.usdt_value), 2)} USDT · {dateText(record.burned_at)} · {record.settled_round ? `已结算 #${record.settled_round}` : "待周结算"}</div>
             </div>
             <span className="font-mono text-xs text-white/35">{displayTx(record.source_tx_hash)}</span>
           </CardContent>
@@ -618,11 +643,11 @@ function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming
   );
 }
 
-function Mini({ label, value }: { label: string; value: string }) {
+function Mini({ label, value, unit }: { label: string; value: string; unit: string }) {
   return (
     <div className="rounded-md border border-white/5 bg-black/30 p-2">
       <div className="text-[10px] text-white/35">{label}</div>
-      <div className="mt-0.5 font-bold text-[#b829ff]">{formatNumber(weiToNumber(value), 2)}</div>
+      <div className="mt-0.5 font-bold text-[#b829ff]">{formatNumber(weiToNumber(value), 2)} <span className="text-[10px] text-white/35">{unit}</span></div>
     </div>
   );
 }

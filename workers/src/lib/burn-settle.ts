@@ -22,11 +22,11 @@ async function ownerAddress(env: Env): Promise<string> {
   return readVaultOwner(env);
 }
 
-async function isBurnPromotionActive(env: Env, user: string, minBurnHs: bigint): Promise<boolean> {
-  const row = await env.DB.prepare("SELECT total_burned_hs FROM burn_personal_status WHERE user = ?")
+async function isBurnPromotionActive(env: Env, user: string, minBurnUsdt: bigint): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT total_burned_usdt FROM burn_personal_status WHERE user = ?")
     .bind(user.toLowerCase())
-    .first<{ total_burned_hs: string }>();
-  return BigInt(row?.total_burned_hs ?? "0") >= minBurnHs;
+    .first<{ total_burned_usdt: string }>();
+  return BigInt(row?.total_burned_usdt ?? "0") >= minBurnUsdt;
 }
 
 async function insertReferralReward(env: Env, params: {
@@ -42,7 +42,7 @@ async function insertReferralReward(env: Env, params: {
   await env.DB.prepare(
     `INSERT INTO referral_rewards
        (id, user, source_user, kind, reward_token, reward_amount, basis_amount, basis_kind, source_ref, earned_at)
-     VALUES (?, ?, ?, ?, 'HS', ?, ?, 'burn', ?, ?)`,
+    VALUES (?, ?, ?, ?, 'USDT', ?, ?, 'burn-usdt', ?, ?)`,
   )
     .bind(
       ulid(),
@@ -81,7 +81,7 @@ async function outUsers(env: Env): Promise<Set<string>> {
  * 流程：
  *   1) 当周（settled_round = current）的 burn_records 总额 → burn_rounds
  *   2) 按 50/20/15/5/5/5 分配
- *   3) 选 Top10 → 60% 当周发，40% 滚下周（top10_carryover_hs）
+ *   3) 选 Top10 → 60% 当周发，40% 滚下周（top10_carryover_usdt）
  *   4) 把 records 标记为已结算
  *   5) 推进 burn_current_round
  */
@@ -95,40 +95,47 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
 
   // 当周燃烧总额（settled_round 为 NULL 的所有 burn_records）
   const burnRows = await env.DB.prepare(
-    "SELECT id, user, hs_amount, referrer FROM burn_records WHERE settled_round IS NULL",
-  ).all<{ id: string; user: string; hs_amount: string; referrer: string | null }>();
-  let totalBurn = 0n;
-  const userBurns = new Map<string, bigint>();
+    "SELECT id, user, hs_amount, usdt_value, referrer FROM burn_records WHERE settled_round IS NULL",
+  ).all<{ id: string; user: string; hs_amount: string; usdt_value: string; referrer: string | null }>();
+  let totalBurnHs = 0n;
+  let totalBurnUsdt = 0n;
+  const userBurns = new Map<string, { burnHs: bigint; burnUsdt: bigint }>();
   for (const row of burnRows.results ?? []) {
-    const amount = BigInt(row.hs_amount);
-    totalBurn += amount;
-    userBurns.set(row.user, (userBurns.get(row.user) ?? 0n) + amount);
+    const hsAmount = BigInt(row.hs_amount);
+    const usdtValue = BigInt(row.usdt_value);
+    totalBurnHs += hsAmount;
+    totalBurnUsdt += usdtValue;
+    const current = userBurns.get(row.user) ?? { burnHs: 0n, burnUsdt: 0n };
+    current.burnHs += hsAmount;
+    current.burnUsdt += usdtValue;
+    userBurns.set(row.user, current);
   }
   const out = await outUsers(env);
 
   // 上周 Top10 滚入
-  const lastCarryRow = await env.DB.prepare("SELECT top10_carryover_hs FROM burn_rounds WHERE round = ?").bind(round - 1).first<{ top10_carryover_hs: string }>();
-  const carryover = BigInt(lastCarryRow?.top10_carryover_hs ?? "0");
+  const lastCarryRow = await env.DB.prepare("SELECT top10_carryover_usdt FROM burn_rounds WHERE round = ?").bind(round - 1).first<{ top10_carryover_usdt: string }>();
+  const carryover = BigInt(lastCarryRow?.top10_carryover_usdt ?? "0");
 
   // 资金分配
-  const blackHole = (totalBurn * BigInt(BURN_ALLOCATION_BPS.blackHole)) / BigInt(BPS_DENOMINATOR);
-  const weight = (totalBurn * BigInt(BURN_ALLOCATION_BPS.weight)) / BigInt(BPS_DENOMINATOR);
-  const promotion = (totalBurn * BigInt(BURN_ALLOCATION_BPS.promotion)) / BigInt(BPS_DENOMINATOR);
-  const stakePool = (totalBurn * BigInt(BURN_ALLOCATION_BPS.stake)) / BigInt(BPS_DENOMINATOR);
-  const aiPool = (totalBurn * BigInt(BURN_ALLOCATION_BPS.aiStock)) / BigInt(BPS_DENOMINATOR);
-  const top10Pool = (totalBurn * BigInt(BURN_ALLOCATION_BPS.top10)) / BigInt(BPS_DENOMINATOR) + carryover;
+  const blackHole = (totalBurnUsdt * BigInt(BURN_ALLOCATION_BPS.blackHole)) / BigInt(BPS_DENOMINATOR);
+  const weight = (totalBurnUsdt * BigInt(BURN_ALLOCATION_BPS.weight)) / BigInt(BPS_DENOMINATOR);
+  const promotion = (totalBurnUsdt * BigInt(BURN_ALLOCATION_BPS.promotion)) / BigInt(BPS_DENOMINATOR);
+  const stakePool = (totalBurnUsdt * BigInt(BURN_ALLOCATION_BPS.stake)) / BigInt(BPS_DENOMINATOR);
+  const aiPool = (totalBurnUsdt * BigInt(BURN_ALLOCATION_BPS.aiStock)) / BigInt(BPS_DENOMINATOR);
+  const top10Pool = (totalBurnUsdt * BigInt(BURN_ALLOCATION_BPS.top10)) / BigInt(BPS_DENOMINATOR) + carryover;
 
   const now = await nowSeconds(env);
   await env.DB.prepare(
-    `INSERT OR REPLACE INTO burn_rounds (round, opened_at, closed_at, total_burn_hs, weight_pool_hs,
-       promotion_pool_hs, stake_pool_hs, ai_pool_hs, top10_pool_hs, black_hole_hs, settled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+    `INSERT OR REPLACE INTO burn_rounds (round, opened_at, closed_at, total_burn_hs, total_burn_usdt, weight_pool_usdt,
+       promotion_pool_usdt, stake_pool_usdt, ai_pool_usdt, top10_pool_usdt, black_hole_usdt, settled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
   )
     .bind(
       round,
       now - 7 * 86400,
       now,
-      totalBurn.toString(),
+      totalBurnHs.toString(),
+      totalBurnUsdt.toString(),
       weight.toString(),
       promotion.toString(),
       stakePool.toString(),
@@ -141,36 +148,35 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
   // Top 10：按当周 burn_records 用户聚合
   const top10 = [...userBurns.entries()]
     .filter(([user]) => !out.has(user.toLowerCase()))
-    .map(([user, burn]) => ({ user, burn }))
-    .sort((a, b) => (a.burn === b.burn ? a.user.localeCompare(b.user) : a.burn > b.burn ? -1 : 1))
+    .map(([user, burn]) => ({ user, burnHs: burn.burnHs, burnUsdt: burn.burnUsdt }))
+    .sort((a, b) => (a.burnUsdt === b.burnUsdt ? a.user.localeCompare(b.user) : a.burnUsdt > b.burnUsdt ? -1 : 1))
     .slice(0, 10);
-  let totalTop10Burn = 0n;
-  for (const r of top10) totalTop10Burn += r.burn;
+  let totalTop10BurnUsdt = 0n;
+  for (const r of top10) totalTop10BurnUsdt += r.burnUsdt;
 
   const payoutPool = (top10Pool * BigInt(BURN_WEEKLY_PAYOUT_BPS)) / BigInt(BPS_DENOMINATOR);
   const carryNext = top10Pool - payoutPool;
 
   for (let i = 0; i < top10.length; i++) {
     const u = top10[i];
-    const burn = u.burn;
-    if (burn === 0n || totalTop10Burn === 0n) continue;
-    const reward = (payoutPool * burn) / totalTop10Burn;
+    if (u.burnUsdt === 0n || totalTop10BurnUsdt === 0n) continue;
+    const reward = (payoutPool * u.burnUsdt) / totalTop10BurnUsdt;
     await env.DB.prepare(
-      `INSERT INTO burn_top10_settlements (id, round, user, rank, burn_hs, reward_hs)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO burn_top10_settlements (id, round, user, rank, burn_hs, burn_usdt, reward_usdt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(ulid(), round, u.user, i + 1, burn.toString(), reward.toString())
+      .bind(ulid(), round, u.user, i + 1, u.burnHs.toString(), u.burnUsdt.toString(), reward.toString())
       .run();
   }
 
   // 20% 权重分红：按本周燃烧额占比分给燃烧者。
   for (const u of userBurns.entries()) {
     const [user, burn] = u;
-    const reward = totalBurn > 0n ? (weight * burn) / totalBurn : 0n;
+    const reward = totalBurnUsdt > 0n ? (weight * burn.burnUsdt) / totalBurnUsdt : 0n;
     await addRewardClaim(env, {
       user,
       kind: "burn-weight",
-      token: "HS",
+      token: "USDT",
       amount: reward,
       round,
       sourceRef: `burn-weight:${round}`,
@@ -180,9 +186,9 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
 
   // 15% 推广奖励：一代 10%，二代 5%；未激活或无上级归官方。
   const official = await ownerAddress(env);
-  const minPromotionBurn = await usdtWeiToHsWei(env, BigInt(BURN_PROMOTION_ACTIVATE_USDT) * 10n ** 18n);
+  const minPromotionBurn = BigInt(BURN_PROMOTION_ACTIVATE_USDT) * 10n ** 18n;
   for (const row of burnRows.results ?? []) {
-    const amount = BigInt(row.hs_amount);
+    const amount = BigInt(row.usdt_value);
     const gen1 = row.referrer?.toLowerCase() || official;
     const gen2 = gen1 === official ? official : await directUpperOf(env, gen1) ?? official;
     const gen1Active = gen1 === official || (!out.has(gen1) && await isBurnPromotionActive(env, gen1, minPromotionBurn));
@@ -229,7 +235,7 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
     await addRewardClaim(env, {
       user: row.user,
       kind: "stake-burn-dividend",
-      token: "HS",
+      token: "USDT",
       amount: totalStakeValue > 0n ? (stakePool * row.value) / totalStakeValue : 0n,
       round,
       sourceRef: `stake-burn:${round}:${row.id}`,
@@ -237,13 +243,12 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
     });
   }
 
-  // 5% AI 股票分红：按链下股票总持仓占比，把 HS 池折成 STOCK 奖励。
+  // 5% AI 股票分红：按链下股票总持仓占比，把 U 池折成 STOCK 奖励。
   const stockRows = await env.DB.prepare("SELECT user, total_stock FROM stock_holdings").all<{ user: string; total_stock: string }>();
   let totalStock = 0n;
   const eligibleStockRows = (stockRows.results ?? []).filter((row) => !out.has(row.user.toLowerCase()));
   for (const row of eligibleStockRows) totalStock += BigInt(row.total_stock);
-  const aiPoolUsdt = await hsWeiToUsdtWei(env, aiPool);
-  const aiPoolStock = await usdtWeiToStockWei(env, aiPoolUsdt);
+  const aiPoolStock = await usdtWeiToStockWei(env, aiPool);
   for (const row of eligibleStockRows) {
     const stock = BigInt(row.total_stock);
     await addRewardClaim(env, {
@@ -271,10 +276,10 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
 
   // 标记 burn_records 已结算
   await env.DB.prepare("UPDATE burn_records SET settled_round = ? WHERE settled_round IS NULL").bind(round).run();
-  await env.DB.prepare("UPDATE burn_rounds SET top10_carryover_hs = ?, settled = 1 WHERE round = ?")
+  await env.DB.prepare("UPDATE burn_rounds SET top10_carryover_usdt = ?, settled = 1 WHERE round = ?")
     .bind(carryNext.toString(), round)
     .run();
   await env.DB.prepare("UPDATE admin_config SET value = ? WHERE key = 'burn_current_round'").bind(String(round + 1)).run();
 
-  return { round, total: totalBurn.toString(), top10: top10.length };
+  return { round, total: totalBurnUsdt.toString(), top10: top10.length };
 }

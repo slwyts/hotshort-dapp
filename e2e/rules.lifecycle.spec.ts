@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { parseEther, type Address } from "viem";
-import { VAULT_ABI } from "../lib/contracts/abis";
+import { ERC20_ABI, VAULT_ABI } from "../lib/contracts/abis";
 import {
   BPS_DENOMINATOR,
   LOTTERY_PRIZE_BPS,
@@ -40,9 +40,25 @@ type StakeOrderResponse = {
 
 type StakeClaimResponse = VaultClaim & {
   amount: string;
+  principalToken: Address;
+  principalAmount: string;
   claimableHs: string;
   fuelBurnHs: string;
 };
+
+const DEAD_ADDRESS = "0x000000000000000000000000000000000000dEaD" as Address;
+
+function sumClaimPayout(claim: VaultClaim, token: Address, recipient?: Address): bigint {
+  const expectedToken = token.toLowerCase();
+  const expectedRecipient = recipient?.toLowerCase();
+  return claim.amounts.reduce((total, amount, index) => {
+    const payoutToken = (claim.tokens?.[index] ?? claim.token).toLowerCase();
+    const payoutRecipient = claim.recipients[index]?.toLowerCase();
+    if (payoutToken !== expectedToken) return total;
+    if (expectedRecipient && payoutRecipient !== expectedRecipient) return total;
+    return total + BigInt(amount);
+  }, 0n);
+}
 
 type AiBuyResponse = {
   id: string;
@@ -85,11 +101,11 @@ type LotteryRoundResponse = {
 type BurnMeResponse = {
   totalBurnedHs: string;
   totalBurnedUsdt: string;
-  personalClaimedHs: string;
-  personalClaimableHs: string;
+  personalClaimedUsdt: string;
+  personalClaimableUsdt: string;
   personalClaimed: boolean;
   out: boolean;
-  top10PendingHs: string;
+  burnPendingUsdt: string;
   eligibleAirdrop: boolean;
 };
 
@@ -181,7 +197,7 @@ async function recordBurn(params: {
   referrer?: Address;
 }) {
   const sourceTxHash = await burnHsToVault(params.account, params.amount, params.referrer);
-  return apiRequest<{ id: string; totalBurnedHs: string; out: boolean }>("/burn/record", {
+  return apiRequest<{ id: string; totalBurnedHs: string; totalBurnedUsdt: string; out: boolean }>("/burn/record", {
     method: "POST",
     headers: bearer(params.jwt),
     body: JSON.stringify({
@@ -274,16 +290,26 @@ test.describe("README rule lifecycle scripts", () => {
 
     await advanceTime(12 * 30 * 86400 + 1);
 
-    for (const orderId of [oldUsdtOrder.id, newUsdtOrder.id, hsOrder.id, lpOrder.id]) {
+    const stakeClaims = [
+      { orderId: oldUsdtOrder.id, principalToken: USDT_TOKEN as Address },
+      { orderId: newUsdtOrder.id, principalToken: USDT_TOKEN as Address },
+      { orderId: hsOrder.id, principalToken: HS_TOKEN as Address },
+      { orderId: lpOrder.id, principalToken: PANCAKE_PAIR as Address },
+    ];
+    for (const { orderId, principalToken } of stakeClaims) {
       const claim = await apiRequest<StakeClaimResponse>("/stake/claim", {
         method: "POST",
         headers: bearer(aliceJwt),
         body: JSON.stringify({ orderId }),
       });
-      expect(claim.token.toLowerCase()).toBe(HS_TOKEN.toLowerCase());
+      expect(claim.principalToken.toLowerCase()).toBe(principalToken.toLowerCase());
       expect(claim.reason).toBe(1);
       expect(BigInt(claim.claimableHs)).toBeGreaterThan(0n);
       expect(BigInt(claim.fuelBurnHs)).toBeGreaterThan(0n);
+      const expectedAliceHs = BigInt(claim.claimableHs) + (principalToken.toLowerCase() === HS_TOKEN.toLowerCase() ? BigInt(claim.principalAmount) : 0n);
+      expect(sumClaimPayout(claim, principalToken, ALICE.address as Address)).toBeGreaterThanOrEqual(BigInt(claim.principalAmount));
+      expect(sumClaimPayout(claim, HS_TOKEN as Address, ALICE.address as Address)).toBe(expectedAliceHs);
+      expect(sumClaimPayout(claim, HS_TOKEN as Address, DEAD_ADDRESS)).toBe(BigInt(claim.fuelBurnHs));
       expect(claim.recipients.some((recipient) => recipient.toLowerCase().endsWith("dead"))).toBe(true);
       await claimFromVault(ALICE, claim);
       await expectNonceConsumed(claim);
@@ -514,9 +540,10 @@ test.describe("README rule lifecycle scripts", () => {
       lockMonths: 6,
     });
 
-    await recordBurn({ account: ALICE, jwt: aliceJwt, amount: parseEther("1500000") });
-    await recordBurn({ account: BOB, jwt: bobJwt, amount: parseEther("2000"), referrer: ALICE.address as Address });
-    await recordBurn({ account: CHARLIE, jwt: charlieJwt, amount: parseEther("1000"), referrer: BOB.address as Address });
+    const aliceBurn = await recordBurn({ account: ALICE, jwt: aliceJwt, amount: parseEther("1500000") });
+    const bobBurn = await recordBurn({ account: BOB, jwt: bobJwt, amount: parseEther("2000"), referrer: ALICE.address as Address });
+    const charlieBurn = await recordBurn({ account: CHARLIE, jwt: charlieJwt, amount: parseEther("1000"), referrer: BOB.address as Address });
+    const expectedBurnRoundUsdt = BigInt(aliceBurn.totalBurnedUsdt) + BigInt(bobBurn.totalBurnedUsdt) + BigInt(charlieBurn.totalBurnedUsdt);
 
     const leaderboard = await apiRequest<{ rows: { user: string; burn_hs: string }[] }>("/burn/leaderboard");
     expect(leaderboard.rows.map((row) => row.user)).toEqual([
@@ -526,15 +553,16 @@ test.describe("README rule lifecycle scripts", () => {
     ]);
 
     const settlement = await runTestCron<{ round: number; total: string; top10: number }>("burn-weekly");
-    expect(settlement.result).toMatchObject({ round: burnRound, total: parseEther("1503000").toString(), top10: 3 });
+    expect(settlement.result).toMatchObject({ round: burnRound, total: expectedBurnRoundUsdt.toString(), top10: 3 });
 
     const aliceBurnStatus = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
+    const expectedAlicePersonalUsdt = BigInt(aliceBurnStatus.totalBurnedUsdt) * 2n;
     expect(aliceBurnStatus.eligibleAirdrop).toBe(true);
     expect(BigInt(aliceBurnStatus.totalBurnedUsdt)).toBeGreaterThanOrEqual(parseEther("1000"));
-    expect(BigInt(aliceBurnStatus.top10PendingHs)).toBeGreaterThan(0n);
+    expect(BigInt(aliceBurnStatus.burnPendingUsdt)).toBeGreaterThan(0n);
     expect(aliceBurnStatus.personalClaimed).toBe(false);
     expect(aliceBurnStatus.out).toBe(false);
-    expect(BigInt(aliceBurnStatus.personalClaimableHs)).toBe(parseEther("3000000"));
+    expect(BigInt(aliceBurnStatus.personalClaimableUsdt)).toBe(expectedAlicePersonalUsdt);
 
     const aliceStockRewardClaim = await apiRequest<{
       token: string;
@@ -564,23 +592,42 @@ test.describe("README rule lifecycle scripts", () => {
     const aliceAfterWeeklyClaim = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
     expect(aliceAfterWeeklyClaim.personalClaimed).toBe(false);
     expect(aliceAfterWeeklyClaim.out).toBe(false);
-    expect(BigInt(aliceAfterWeeklyClaim.personalClaimableHs)).toBe(parseEther("3000000"));
+    expect(BigInt(aliceAfterWeeklyClaim.personalClaimableUsdt)).toBe(expectedAlicePersonalUsdt);
 
-    const alicePersonalClaim = await apiRequest<VaultClaim & { amount: string; personalClaimedHs: string }>("/burn/claim/personal", {
+    const aliceUsdtBeforePersonal = await publicClient.readContract({
+      address: USDT_TOKEN as Address,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [ALICE.address as Address],
+    });
+    const alicePersonalClaim = await apiRequest<VaultClaim & { amount: string; personalClaimedUsdt: string }>("/burn/claim/personal", {
       method: "POST",
       headers: bearer(aliceJwt),
     });
     expect(alicePersonalClaim.reason).toBe(8);
-    expect(BigInt(alicePersonalClaim.amount)).toBe(parseEther("3000000"));
-    expect(BigInt(alicePersonalClaim.personalClaimedHs)).toBe(parseEther("3000000"));
-    await claimFromVault(ALICE, alicePersonalClaim);
+    expect(alicePersonalClaim.token.toLowerCase()).toBe(USDT_TOKEN.toLowerCase());
+    expect(BigInt(alicePersonalClaim.amount)).toBe(expectedAlicePersonalUsdt);
+    expect(BigInt(alicePersonalClaim.personalClaimedUsdt)).toBe(expectedAlicePersonalUsdt);
+    const alicePersonalClaimTx = await claimFromVault(ALICE, alicePersonalClaim);
     await expectNonceConsumed(alicePersonalClaim);
+    await apiRequest("/burn/claim/personal/confirm", {
+      method: "POST",
+      headers: bearer(aliceJwt),
+      body: JSON.stringify({ txHash: alicePersonalClaimTx, nonce: alicePersonalClaim.nonce }),
+    });
+    const aliceUsdtAfterPersonal = await publicClient.readContract({
+      address: USDT_TOKEN as Address,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [ALICE.address as Address],
+    });
+    expect(aliceUsdtAfterPersonal - aliceUsdtBeforePersonal).toBe(expectedAlicePersonalUsdt);
 
     const aliceAfterPersonalClaim = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
     expect(aliceAfterPersonalClaim.personalClaimed).toBe(true);
     expect(aliceAfterPersonalClaim.out).toBe(true);
-    expect(BigInt(aliceAfterPersonalClaim.personalClaimableHs)).toBe(0n);
-    expect(BigInt(aliceAfterPersonalClaim.personalClaimedHs)).toBe(parseEther("3000000"));
+    expect(BigInt(aliceAfterPersonalClaim.personalClaimableUsdt)).toBe(0n);
+    expect(BigInt(aliceAfterPersonalClaim.personalClaimedUsdt)).toBe(expectedAlicePersonalUsdt);
 
     const charlieBurnClaim = await apiRequest<BurnClaimResponse>("/burn/claim/top10", {
       method: "POST",

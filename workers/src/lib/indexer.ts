@@ -1,5 +1,6 @@
 import { createPublicClient, http, parseAbiItem, type Address } from "viem";
 import type { Env } from "../env";
+import { hsWeiToUsdtSnapshot } from "./pricing";
 
 const DEPOSITED_EVENT = parseAbiItem(
   "event Deposited(address indexed user, address indexed token, uint256 amount, uint8 indexed purpose, bytes32 ref)",
@@ -130,7 +131,7 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
         .bind(user)
         .run();
       await env.DB.prepare(
-        "UPDATE burn_personal_status SET total_personal_claimed_hs = ?, out_at = COALESCE(out_at, ?), updated_at = ? WHERE user = ?",
+        "UPDATE burn_personal_status SET total_personal_claimed_usdt = ?, out_at = COALESCE(out_at, ?), updated_at = ? WHERE user = ?",
       )
         .bind(log.args.amount.toString(), usedAt, usedAt, user)
         .run();
@@ -140,17 +141,46 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
   // 燃烧记录入账（P3 会基于此分配 50/20/15/5/5/5，先记原始流水）
   for (const log of burned) {
     const id = `burn-${log.transactionHash}-${log.logIndex}`;
+    const user = log.args.user!.toLowerCase();
+    const exists = await env.DB.prepare("SELECT id FROM burn_records WHERE source_tx_hash = ?")
+      .bind(log.transactionHash)
+      .first<{ id: string }>();
+    if (exists) continue;
+
+    const amount = log.args.amount!;
+    const snapshot = await hsWeiToUsdtSnapshot(env, amount);
+    if (snapshot.usdtWei <= 0n || snapshot.priceWei <= 0n) continue;
     await env.DB.prepare(
-      "INSERT OR IGNORE INTO burn_records (id, user, hs_amount, referrer, burned_at, source_tx_hash) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO burn_records (id, user, hs_amount, usdt_value, hs_price_usdt_wei, referrer, burned_at, source_tx_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
       .bind(
         id,
-        log.args.user!.toLowerCase(),
-        log.args.amount!.toString(),
+        user,
+        amount.toString(),
+        snapshot.usdtWei.toString(),
+        snapshot.priceWei.toString(),
         log.args.referrer ? log.args.referrer.toLowerCase() : null,
         Math.floor(Date.now() / 1000),
         log.transactionHash,
       )
+      .run();
+
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO burn_personal_status (user, updated_at) VALUES (?, ?)",
+    )
+      .bind(user, Math.floor(Date.now() / 1000))
+      .run();
+    const status = await env.DB.prepare(
+      "SELECT total_burned_hs, total_burned_usdt FROM burn_personal_status WHERE user = ?",
+    )
+      .bind(user)
+      .first<{ total_burned_hs: string; total_burned_usdt: string }>();
+    const totalBurnedHs = BigInt(status?.total_burned_hs ?? "0") + amount;
+    const totalBurnedUsdt = BigInt(status?.total_burned_usdt ?? "0") + snapshot.usdtWei;
+    await env.DB.prepare(
+      "UPDATE burn_personal_status SET total_burned_hs = ?, total_burned_usdt = ?, updated_at = ? WHERE user = ?",
+    )
+      .bind(totalBurnedHs.toString(), totalBurnedUsdt.toString(), Math.floor(Date.now() / 1000), user)
       .run();
   }
 

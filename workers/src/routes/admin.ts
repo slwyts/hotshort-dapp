@@ -378,6 +378,7 @@ admin.get("/funds", async (c) => {
   }
 
   const hsToken = c.env.HS_TOKEN.toLowerCase() as Address;
+  const usdtToken = c.env.USDT_TOKEN.toLowerCase() as Address;
   const lotteryRows = await c.env.DB.prepare(
     "SELECT prize_hs, claim_nonce FROM lottery_tickets WHERE claimed = 0 AND prize_hs IS NOT NULL",
   ).all<{ prize_hs: string | null; claim_nonce: string | null }>();
@@ -387,11 +388,11 @@ admin.get("/funds", async (c) => {
   }
 
   const top10Rows = await c.env.DB.prepare(
-    "SELECT reward_hs, claim_nonce FROM burn_top10_settlements WHERE claimed = 0",
-  ).all<{ reward_hs: string; claim_nonce: string | null }>();
+    "SELECT reward_usdt, claim_nonce FROM burn_top10_settlements WHERE claimed = 0",
+  ).all<{ reward_usdt: string; claim_nonce: string | null }>();
   for (const row of top10Rows.results ?? []) {
     if (row.claim_nonce && activeNonces.has(row.claim_nonce)) continue;
-    addPressure(pending, hsToken, BigInt(row.reward_hs));
+    addPressure(pending, usdtToken, BigInt(row.reward_usdt));
   }
 
   const rewardRows = await c.env.DB.prepare(

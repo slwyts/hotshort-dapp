@@ -27,13 +27,14 @@ import { formatNumber, shortenAddress, cn } from "@/lib/utils";
 interface BurnMe {
   totalBurnedHs: string;
   totalBurnedUsdt: string;
-  personalClaimedHs: string;
-  personalClaimableHs: string;
+  personalClaimedUsdt: string;
+  personalClaimableUsdt: string;
   personalClaimed: boolean;
   out: boolean;
   promotionActive?: boolean;
   promotionActivationUsdt?: string;
-  top10PendingHs: string;
+  burnPendingUsdt: string;
+  burnPendingHs: string;
   eligibleAirdrop: boolean;
   airdrop?: {
     hotshortAccount: string;
@@ -44,20 +45,21 @@ interface BurnMe {
 
 interface Leaderboard {
   round: number;
-  rows: { user: string; burn_hs: number | string }[];
+  rows: { user: string; burn_hs: number | string; burn_usdt: number | string }[];
 }
 
 interface BurnRound {
   round: number;
   current: {
     totalBurnHs: string;
-    weightPoolHs: string;
-    promotionPoolHs: string;
-    stakePoolHs: string;
-    aiPoolHs: string;
-    top10PoolHs: string;
-    blackHoleHs: string;
-    top10CarryoverHs: string;
+    totalBurnUsdt: string;
+    weightPoolUsdt: string;
+    promotionPoolUsdt: string;
+    stakePoolUsdt: string;
+    aiPoolUsdt: string;
+    top10PoolUsdt: string;
+    blackHoleUsdt: string;
+    top10CarryoverUsdt: string;
   };
 }
 
@@ -79,13 +81,30 @@ function weiToNumber(value: string | number | bigint | null | undefined): number
   }
 }
 
+function formatClaimAssetSummary(amounts: string[], tokens: string[], contracts: { usdtToken: string; hsToken: string }): string {
+  const totals = new Map<string, bigint>();
+  for (let index = 0; index < amounts.length; index++) {
+    const token = tokens[index]?.toLowerCase();
+    if (!token) continue;
+    totals.set(token, (totals.get(token) ?? 0n) + BigInt(amounts[index]));
+  }
+  const labels = new Map<string, string>([
+    [contracts.usdtToken.toLowerCase(), "USDT"],
+    [contracts.hsToken.toLowerCase(), "HS"],
+  ]);
+  const parts = [...totals.entries()]
+    .filter(([, amount]) => amount > 0n)
+    .map(([token, amount]) => `${formatNumber(Number(formatUnits(amount, 18)), 2)} ${labels.get(token) ?? shortenAddress(token)}`);
+  return parts.length > 0 ? parts.join(" + ") : "0 USDT";
+}
+
 export default function BurnPage() {
   const { address, isConnected } = useAccount();
   const { jwt, signIn } = useSiweJwt();
   const publicClient = usePublicClient();
   const { writeContractAsync } = useWriteContract();
   const { t } = useLocale();
-  const { vault, hsToken } = useContracts();
+  const { vault, hsToken, usdtToken } = useContracts();
   const { ensureBound } = useReferralGate();
   const ensureAllowance = useEnsureAllowance();
 
@@ -217,10 +236,12 @@ export default function BurnPage() {
         ],
       });
       await waitForSuccessfulTx(txHash);
+      const claimTokens = sig.tokens ?? sig.amounts!.map(() => sig.token!);
+      const claimedAssets = formatClaimAssetSummary(sig.amounts!, claimTokens, { usdtToken, hsToken });
       await Swal.fire({
         icon: "success",
         title: t("burn.claim.success.title"),
-        html: `${t("burn.claim.success.body", { amount: formatNumber(Number(formatUnits(BigInt(sig.amount), 18)), 2) })}<br/>
+        html: `${t("burn.claim.success.body", { amount: claimedAssets })}<br/>
                <a href="https://bscscan.com/tx/${txHash}" target="_blank" class="text-[#00c6ff] text-xs">${shortenAddress(txHash)}</a>`,
         background: "#141419",
         color: "#fff",
@@ -310,11 +331,13 @@ export default function BurnPage() {
 
   const totalBurn = weiToNumber(me?.totalBurnedHs);
   const totalBurnUsdt = weiToNumber(me?.totalBurnedUsdt);
-  const top10Pending = weiToNumber(me?.top10PendingHs);
-  const personalClaimable = weiToNumber(me?.personalClaimableHs);
-  const personalClaimed = weiToNumber(me?.personalClaimedHs);
+  const burnPendingUsdt = weiToNumber(me?.burnPendingUsdt);
+  const burnPendingHs = weiToNumber(me?.burnPendingHs);
+  const personalClaimableUsdt = weiToNumber(me?.personalClaimableUsdt);
+  const personalClaimedUsdt = weiToNumber(me?.personalClaimedUsdt);
   const currentWeeklyBurn = weiToNumber(round?.current?.totalBurnHs);
-  const currentTop10Pool = weiToNumber(round?.current?.top10PoolHs);
+  const currentWeeklyBurnUsdt = weiToNumber(round?.current?.totalBurnUsdt);
+  const currentTop10PoolUsdt = weiToNumber(round?.current?.top10PoolUsdt);
   const promotionActive = Boolean(me?.promotionActive || totalBurnUsdt >= BURN_PROMOTION_ACTIVATE_USDT);
   const airdropStatus = me?.airdrop?.status ?? "none";
   const canSubmitAirdrop = airdropStatus === "none" || airdropStatus === "rejected";
@@ -357,16 +380,16 @@ export default function BurnPage() {
           {me && (
             <div className="grid grid-cols-2 gap-1.5 text-center">
               <Stat label={t("burn.stat.total")} value={formatNumber(totalBurn, 0)} unit="HS" />
-              <Stat label={t("burn.stat.personalClaimable")} value={formatNumber(personalClaimable, 2)} unit="HS" accent />
-              <Stat label={t("burn.stat.weeklyClaimable")} value={formatNumber(top10Pending, 2)} unit="HS" />
-              <Stat label={t("burn.stat.status")} value={me.out ? t("burn.status.weightOnly") : t("burn.status.active")} unit="" subtle />
+              <Stat label={t("burn.stat.totalValue")} value={formatNumber(totalBurnUsdt, 2)} unit="USDT" />
+              <Stat label={t("burn.stat.personalClaimable")} value={formatNumber(personalClaimableUsdt, 2)} unit="USDT" accent />
+              <Stat label={t("burn.stat.weeklyClaimable")} value={formatNumber(burnPendingUsdt, 2)} unit="USDT" />
             </div>
           )}
 
           {me && (
             <div className="rounded-md border border-[#ef4444]/20 bg-[#ef4444]/5 px-3 py-2 text-[11px] leading-relaxed text-red-100/75">
               {me.out || me.personalClaimed
-                ? t("burn.personalHint.done", { amount: formatNumber(personalClaimed, 2) })
+                ? t("burn.personalHint.done", { amount: formatNumber(personalClaimedUsdt, 2) })
                 : t("burn.personalHint.active")}
             </div>
           )}
@@ -382,12 +405,12 @@ export default function BurnPage() {
             </div>
           )}
 
-          {me && personalClaimable > 0 && !me.out && !me.personalClaimed && (
+          {me && personalClaimableUsdt > 0 && !me.out && !me.personalClaimed && (
             <Button onClick={claimPersonal} variant="outline" className="w-full border-[#ef4444]/40 text-red-100 hover:bg-[#ef4444]/10">
               <Flame className="h-4 w-4" /> {t("burn.claimPersonal")}
             </Button>
           )}
-          {me && top10Pending > 0 && (
+          {me && (burnPendingUsdt > 0 || burnPendingHs > 0) && (
             <Button onClick={claimTop10} variant="outline" className="w-full">
               <Award className="h-4 w-4" /> {t("burn.claimWeekly")}
             </Button>
@@ -403,7 +426,8 @@ export default function BurnPage() {
         <CardContent>
           <div className="mb-3 grid grid-cols-2 gap-2">
             <Stat label={t("burn.pendingBurnTotal")} value={formatNumber(currentWeeklyBurn, 0)} unit="HS" accent />
-            <Stat label={t("burn.top10Pool")} value={formatNumber(currentTop10Pool, 2)} unit="HS" />
+            <Stat label={t("burn.pendingBurnValue")} value={formatNumber(currentWeeklyBurnUsdt, 2)} unit="USDT" />
+            <Stat label={t("burn.top10Pool")} value={formatNumber(currentTop10PoolUsdt, 2)} unit="USDT" />
           </div>
           <div className="mb-3 rounded-md border border-[#00c6ff]/20 bg-[#00c6ff]/5 px-3 py-2 text-[11px] leading-relaxed text-[#8fe7ff]">
             {t("burn.poolHint", { activate: BURN_PROMOTION_ACTIVATE_USDT })}
@@ -459,7 +483,7 @@ export default function BurnPage() {
                     <span className="font-mono text-xs">{shortenAddress(r.user, 4)}</span>
                   </div>
                   <span className="font-bold tabular-nums">
-                    {formatNumber(weiToNumber(r.burn_hs), 2)}
+                    {formatNumber(weiToNumber(r.burn_usdt), 2)} <span className="text-xs text-white/40">USDT</span>
                   </span>
                 </div>
               ))}

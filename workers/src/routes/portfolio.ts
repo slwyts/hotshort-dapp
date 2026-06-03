@@ -154,16 +154,16 @@ portfolio.get("/", async (c) => {
   for (const r of divRows.results ?? []) divPendingStockWei += parseWei(r.stock_share);
   const divPendingUsdt = weiToNumber(divPendingStockWei) * prices.stock;
 
-  // 4d) 燃烧周榜未领（HS）
+  // 4d) 燃烧周榜未领（USDT）
   const burnRows = await c.env.DB.prepare(
-    `SELECT reward_hs
+    `SELECT reward_usdt
      FROM burn_top10_settlements WHERE user = ? AND claimed = 0`,
   )
     .bind(user)
-    .all<{ reward_hs: string }>();
-  let burnPendingHsWei = 0n;
-  for (const r of burnRows.results ?? []) burnPendingHsWei += parseWei(r.reward_hs);
-  const burnPendingUsdt = weiToNumber(burnPendingHsWei) * prices.hs;
+    .all<{ reward_usdt: string }>();
+  let burnPendingUsdtWei = 0n;
+  for (const r of burnRows.results ?? []) burnPendingUsdtWei += parseWei(r.reward_usdt);
+  const burnPendingUsdt = weiToNumber(burnPendingUsdtWei);
 
   // 4e) 团队奖励未领（USDT / STOCK / HS 三种 token，混合折算）
   const refRow = await c.env.DB.prepare(

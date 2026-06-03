@@ -231,6 +231,8 @@ CREATE TABLE IF NOT EXISTS burn_records (
   id TEXT PRIMARY KEY,
   user TEXT NOT NULL,
   hs_amount TEXT NOT NULL,
+  usdt_value TEXT NOT NULL,
+  hs_price_usdt_wei TEXT NOT NULL,
   referrer TEXT,
   settled_round INTEGER,
   claimed_individual INTEGER NOT NULL DEFAULT 0,
@@ -247,13 +249,14 @@ CREATE TABLE IF NOT EXISTS burn_rounds (
   opened_at INTEGER NOT NULL,
   closed_at INTEGER,
   total_burn_hs TEXT NOT NULL DEFAULT '0',
-  weight_pool_hs TEXT NOT NULL DEFAULT '0',
-  promotion_pool_hs TEXT NOT NULL DEFAULT '0',
-  stake_pool_hs TEXT NOT NULL DEFAULT '0',
-  ai_pool_hs TEXT NOT NULL DEFAULT '0',
-  top10_pool_hs TEXT NOT NULL DEFAULT '0',
-  black_hole_hs TEXT NOT NULL DEFAULT '0',
-  top10_carryover_hs TEXT NOT NULL DEFAULT '0',
+  total_burn_usdt TEXT NOT NULL DEFAULT '0',
+  weight_pool_usdt TEXT NOT NULL DEFAULT '0',
+  promotion_pool_usdt TEXT NOT NULL DEFAULT '0',
+  stake_pool_usdt TEXT NOT NULL DEFAULT '0',
+  ai_pool_usdt TEXT NOT NULL DEFAULT '0',
+  top10_pool_usdt TEXT NOT NULL DEFAULT '0',
+  black_hole_usdt TEXT NOT NULL DEFAULT '0',
+  top10_carryover_usdt TEXT NOT NULL DEFAULT '0',
   settled INTEGER NOT NULL DEFAULT 0
 );
 
@@ -261,7 +264,8 @@ CREATE TABLE IF NOT EXISTS burn_rounds (
 CREATE TABLE IF NOT EXISTS burn_personal_status (
   user TEXT PRIMARY KEY,
   total_burned_hs TEXT NOT NULL DEFAULT '0',
-  total_personal_claimed_hs TEXT NOT NULL DEFAULT '0',
+  total_burned_usdt TEXT NOT NULL DEFAULT '0',
+  total_personal_claimed_usdt TEXT NOT NULL DEFAULT '0',
   out_at INTEGER,
   updated_at INTEGER NOT NULL
 );
@@ -273,7 +277,8 @@ CREATE TABLE IF NOT EXISTS burn_top10_settlements (
   user TEXT NOT NULL,
   rank INTEGER NOT NULL,
   burn_hs TEXT NOT NULL,
-  reward_hs TEXT NOT NULL,
+  burn_usdt TEXT NOT NULL,
+  reward_usdt TEXT NOT NULL,
   claimed INTEGER NOT NULL DEFAULT 0,
   claim_nonce TEXT
 );

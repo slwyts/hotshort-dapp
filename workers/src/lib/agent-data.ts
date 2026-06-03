@@ -266,10 +266,10 @@ export async function getUserFinancialSummary(env: Env, userAddress: string): Pr
     .all<{ stock_share: string }>();
   for (const row of dividendRows.results ?? []) pendingUsdtWei += await stockWeiToUsdtWei(env, parseWei(row.stock_share));
 
-  const burnRows = await env.DB.prepare("SELECT reward_hs FROM burn_top10_settlements WHERE user = ? AND claimed = 0")
+  const burnRows = await env.DB.prepare("SELECT reward_usdt FROM burn_top10_settlements WHERE user = ? AND claimed = 0")
     .bind(user)
-    .all<{ reward_hs: string }>();
-  for (const row of burnRows.results ?? []) pendingUsdtWei += await hsWeiToUsdtWei(env, parseWei(row.reward_hs));
+    .all<{ reward_usdt: string }>();
+  for (const row of burnRows.results ?? []) pendingUsdtWei += parseWei(row.reward_usdt);
 
   const rewardRows = await env.DB.prepare(
     `SELECT reward_token, reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0

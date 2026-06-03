@@ -124,12 +124,12 @@ export async function distributeLpDividend(
     };
   }
 
-  const rawRows = await env.DB.prepare("SELECT user, hs_amount FROM burn_records")
-    .all<{ user: string; hs_amount: string }>();
+  const rawRows = await env.DB.prepare("SELECT user, usdt_value FROM burn_records")
+    .all<{ user: string; usdt_value: string }>();
   const burnMap = new Map<string, bigint>();
   for (const row of rawRows.results ?? []) {
     const user = row.user.toLowerCase();
-    burnMap.set(user, (burnMap.get(user) ?? 0n) + BigInt(row.hs_amount));
+    burnMap.set(user, (burnMap.get(user) ?? 0n) + BigInt(row.usdt_value));
   }
 
   const out = await outUsers(env);

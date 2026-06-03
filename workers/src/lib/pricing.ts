@@ -47,6 +47,12 @@ export async function hsWeiToUsdtWei(env: Env, hsWei: bigint): Promise<bigint> {
   return (hsWei * price) / SCALE;
 }
 
+export async function hsWeiToUsdtSnapshot(env: Env, hsWei: bigint): Promise<{ priceWei: bigint; usdtWei: bigint }> {
+  if (hsWei <= 0n) return { priceWei: 0n, usdtWei: 0n };
+  const priceWei = await hsPriceWei(env);
+  return { priceWei, usdtWei: priceWei > 0n ? (hsWei * priceWei) / SCALE : 0n };
+}
+
 export async function stockWeiToUsdtWei(env: Env, stockWei: bigint): Promise<bigint> {
   if (stockWei <= 0n) return 0n;
   const price = await stockPriceWei(env);
