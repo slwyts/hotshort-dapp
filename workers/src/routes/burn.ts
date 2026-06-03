@@ -8,7 +8,6 @@ import { nowSeconds } from "../lib/time";
 import { createClaimSignature, getExistingSignature, getExistingSignatureForUserReason } from "../lib/claims";
 import { deterministicNonce } from "../lib/nonce";
 import { markRewardRowsSigned, type RewardClaimRow } from "../lib/reward-claims";
-import { readTokenBalance } from "../lib/token-balance";
 import { verifyVaultBurn, verifyVaultClaim } from "../lib/vault-events";
 import { hsWeiToUsdtSnapshot } from "../lib/pricing";
 import {
@@ -89,7 +88,8 @@ burn.get("/me", async (c) => {
 
   const status = await ensurePersonalRow(c.env, user);
   const personalClaimed = await hasClaimedPersonalBurn(c.env, user);
-  const personalClaimableUsdt = status.totalUsdt > 0n && !status.out && !personalClaimed ? status.totalUsdt * 2n : 0n;
+  const personalCapUsdt = status.totalUsdt * 2n;
+  const personalClaimableUsdt = 0n;
   const promotionActivationUsdt = BigInt(BURN_PROMOTION_ACTIVATE_USDT) * 10n ** 18n;
 
   const pendingRows = await c.env.DB.prepare(
@@ -145,6 +145,7 @@ burn.get("/me", async (c) => {
   return c.json({
     totalBurnedHs: status.totalHs.toString(),
     totalBurnedUsdt: status.totalUsdt.toString(),
+    personalCapUsdt: personalCapUsdt.toString(),
     personalClaimedUsdt: status.claimedUsdt.toString(),
     personalClaimableUsdt: personalClaimableUsdt.toString(),
     personalClaimed,
@@ -393,59 +394,13 @@ burn.post("/claim/top10", async (c) => {
 });
 
 /**
- * POST /burn/claim/personal  个人燃烧权益：仅可领取一次，按累计燃烧 2 倍出局。
+ * POST /burn/claim/personal  个人燃烧权益：双倍是出局封顶额度，不是燃烧后立即可领余额。
  */
 burn.post("/claim/personal", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
-
-  const status = await ensurePersonalRow(c.env, user);
-  if (status.totalUsdt <= 0n) return c.json({ amount: "0", error: "no burn" }, 400);
-  if (status.out || await hasClaimedPersonalBurn(c.env, user)) {
-    return c.json({ amount: "0", error: "personal burn already claimed" }, 400);
-  }
-
-  const now = await nowSeconds(c.env);
-  const pending = await c.env.DB.prepare(
-    `SELECT nonce, token, amount, reason, deadline, signature
-       FROM claim_signatures
-      WHERE user = ? AND reason = 8 AND used_at IS NULL AND deadline > ?
-      ORDER BY created_at DESC LIMIT 1`,
-  )
-    .bind(user, now)
-    .first<{ nonce: string; token: string; amount: string; reason: number; deadline: number; signature: Hex }>();
-
-  const token = c.env.USDT_TOKEN.toLowerCase() as Address;
-  const expectedAmount = status.totalUsdt * 2n;
-  const amount = pending?.token?.toLowerCase() === token ? BigInt(pending.amount) : expectedAmount;
-  const vaultBalance = await readTokenBalance(c.env, token, c.env.VAULT_ADDRESS.toLowerCase() as Address).catch(() => null);
-  if (vaultBalance === null) return c.json({ error: "vault balance unavailable" }, 503);
-  if (vaultBalance < amount) return c.json({ error: "insufficient vault USDT balance" }, 503);
-
-  if (pending?.token?.toLowerCase() === token && BigInt(pending.amount) === expectedAmount) {
-    return c.json({
-      token: pending.token,
-      recipients: [user as Address],
-      amounts: [pending.amount],
-      amount: pending.amount,
-      nonce: pending.nonce,
-      deadline: pending.deadline,
-      reason: pending.reason,
-      signature: pending.signature,
-      personalClaimedUsdt: pending.amount,
-      pending: true,
-    });
-  }
-
-  const claim = await createClaimSignature(c.env, {
-    user: user as Address,
-    token,
-    payouts: [{ recipient: user as Address, amount }],
-    reason: 8,
-    now,
-  });
-
-  return c.json({ ...claim, personalClaimedUsdt: amount.toString() });
+  await ensurePersonalRow(c.env, user);
+  return c.json({ amount: "0", error: "personal burn cap is not immediately claimable" }, 400);
 });
 
 /**

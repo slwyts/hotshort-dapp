@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { parseEther, type Address } from "viem";
-import { ERC20_ABI, VAULT_ABI } from "../lib/contracts/abis";
+import { VAULT_ABI } from "../lib/contracts/abis";
 import {
   BPS_DENOMINATOR,
   LOTTERY_PRIZE_BPS,
@@ -101,6 +101,7 @@ type LotteryRoundResponse = {
 type BurnMeResponse = {
   totalBurnedHs: string;
   totalBurnedUsdt: string;
+  personalCapUsdt: string;
   personalClaimedUsdt: string;
   personalClaimableUsdt: string;
   personalClaimed: boolean;
@@ -562,7 +563,8 @@ test.describe("README rule lifecycle scripts", () => {
     expect(BigInt(aliceBurnStatus.burnPendingUsdt)).toBeGreaterThan(0n);
     expect(aliceBurnStatus.personalClaimed).toBe(false);
     expect(aliceBurnStatus.out).toBe(false);
-    expect(BigInt(aliceBurnStatus.personalClaimableUsdt)).toBe(expectedAlicePersonalUsdt);
+    expect(BigInt(aliceBurnStatus.personalCapUsdt)).toBe(expectedAlicePersonalUsdt);
+    expect(BigInt(aliceBurnStatus.personalClaimableUsdt)).toBe(0n);
 
     const aliceStockRewardClaim = await apiRequest<{
       token: string;
@@ -592,42 +594,22 @@ test.describe("README rule lifecycle scripts", () => {
     const aliceAfterWeeklyClaim = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
     expect(aliceAfterWeeklyClaim.personalClaimed).toBe(false);
     expect(aliceAfterWeeklyClaim.out).toBe(false);
-    expect(BigInt(aliceAfterWeeklyClaim.personalClaimableUsdt)).toBe(expectedAlicePersonalUsdt);
+    expect(BigInt(aliceAfterWeeklyClaim.personalCapUsdt)).toBe(expectedAlicePersonalUsdt);
+    expect(BigInt(aliceAfterWeeklyClaim.personalClaimableUsdt)).toBe(0n);
 
-    const aliceUsdtBeforePersonal = await publicClient.readContract({
-      address: USDT_TOKEN as Address,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [ALICE.address as Address],
-    });
-    const alicePersonalClaim = await apiRequest<VaultClaim & { amount: string; personalClaimedUsdt: string }>("/burn/claim/personal", {
+    const alicePersonalClaim = await apiStatus("/burn/claim/personal", {
       method: "POST",
       headers: bearer(aliceJwt),
     });
-    expect(alicePersonalClaim.reason).toBe(8);
-    expect(alicePersonalClaim.token.toLowerCase()).toBe(USDT_TOKEN.toLowerCase());
-    expect(BigInt(alicePersonalClaim.amount)).toBe(expectedAlicePersonalUsdt);
-    expect(BigInt(alicePersonalClaim.personalClaimedUsdt)).toBe(expectedAlicePersonalUsdt);
-    const alicePersonalClaimTx = await claimFromVault(ALICE, alicePersonalClaim);
-    await expectNonceConsumed(alicePersonalClaim);
-    await apiRequest("/burn/claim/personal/confirm", {
-      method: "POST",
-      headers: bearer(aliceJwt),
-      body: JSON.stringify({ txHash: alicePersonalClaimTx, nonce: alicePersonalClaim.nonce }),
-    });
-    const aliceUsdtAfterPersonal = await publicClient.readContract({
-      address: USDT_TOKEN as Address,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [ALICE.address as Address],
-    });
-    expect(aliceUsdtAfterPersonal - aliceUsdtBeforePersonal).toBe(expectedAlicePersonalUsdt);
+    expect(alicePersonalClaim.status).toBe(400);
+    expect(alicePersonalClaim.body).toMatchObject({ amount: "0", error: "personal burn cap is not immediately claimable" });
 
-    const aliceAfterPersonalClaim = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
-    expect(aliceAfterPersonalClaim.personalClaimed).toBe(true);
-    expect(aliceAfterPersonalClaim.out).toBe(true);
-    expect(BigInt(aliceAfterPersonalClaim.personalClaimableUsdt)).toBe(0n);
-    expect(BigInt(aliceAfterPersonalClaim.personalClaimedUsdt)).toBe(expectedAlicePersonalUsdt);
+    const aliceAfterPersonalClaimAttempt = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
+    expect(aliceAfterPersonalClaimAttempt.personalClaimed).toBe(false);
+    expect(aliceAfterPersonalClaimAttempt.out).toBe(false);
+    expect(BigInt(aliceAfterPersonalClaimAttempt.personalCapUsdt)).toBe(expectedAlicePersonalUsdt);
+    expect(BigInt(aliceAfterPersonalClaimAttempt.personalClaimableUsdt)).toBe(0n);
+    expect(BigInt(aliceAfterPersonalClaimAttempt.personalClaimedUsdt)).toBe(0n);
 
     const charlieBurnClaim = await apiRequest<BurnClaimResponse>("/burn/claim/top10", {
       method: "POST",

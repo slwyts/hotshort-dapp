@@ -68,6 +68,7 @@ interface TicketOrder {
 interface BurnMe {
   totalBurnedHs: string;
   totalBurnedUsdt: string;
+  personalCapUsdt: string;
   personalClaimedUsdt: string;
   personalClaimableUsdt: string;
   personalClaimed: boolean;
@@ -337,33 +338,6 @@ export function OrdersSection() {
     }
   };
 
-  const claimPersonalBurn = async () => {
-    const token = jwt ?? (await signIn());
-    if (!token) return;
-    setClaiming("burn-personal");
-    try {
-      Swal.fire({ title: t("burn.personalClaim.preparing"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
-      const sig = await api.post<ClaimSig>(endpoints.burnClaimPersonal, {}, token);
-      Swal.fire({ title: t("burn.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
-      const txHash = await sendVaultClaim(sig);
-      await api.post(endpoints.burnClaimPersonalConfirm, { txHash, nonce: sig.nonce }, token);
-      await Swal.fire({
-        icon: "success",
-        title: t("burn.personalClaim.success.title"),
-        html: `${t("burn.personalClaim.success.body", { amount: formatNumber(weiToNumber(sig.amount), 2) })}<br/><span class="text-xs text-white/50">${displayTx(txHash)}</span>`,
-        background: "#141419",
-        color: "#fff",
-        confirmButtonColor: "#b829ff",
-      });
-      await refresh();
-    } catch (e) {
-      Swal.close();
-      await Swal.fire({ icon: "error", title: t("error.title"), text: (e as Error).message, background: "#141419", color: "#fff" });
-    } finally {
-      setClaiming(null);
-    }
-  };
-
   if (!isConnected) {
     return <Card><CardContent className="py-12 text-center text-sm text-white/50">{t("me.orders.connect")}</CardContent></Card>;
   }
@@ -395,7 +369,7 @@ export function OrdersSection() {
       ) : activeType === "lottery" ? (
         <LotteryOrders tickets={tickets} expanded={expanded} setExpanded={setExpanded} claimLottery={claimLottery} claiming={claiming} />
       ) : (
-        <BurnOrders me={burnMe} round={burnRound} records={burnRecords} claimBurn={claimBurn} claimPersonalBurn={claimPersonalBurn} claiming={claiming} />
+        <BurnOrders me={burnMe} round={burnRound} records={burnRecords} claimBurn={claimBurn} claiming={claiming} />
       )}
     </div>
   );
@@ -587,17 +561,16 @@ function LotteryOrders({ tickets, expanded, setExpanded, claimLottery, claiming 
   );
 }
 
-function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming }: {
+function BurnOrders({ me, round, records, claimBurn, claiming }: {
   me: BurnMe | null;
   round: BurnRound | null;
   records: BurnRecord[];
   claimBurn: () => void;
-  claimPersonalBurn: () => void;
   claiming: string | null;
 }) {
   const pending = weiToNumber(me?.burnPendingUsdt);
   const pendingHs = weiToNumber(me?.burnPendingHs);
-  const personalClaimable = weiToNumber(me?.personalClaimableUsdt);
+  const personalCap = weiToNumber(me?.personalCapUsdt);
   const breakdown = me?.pendingBreakdown;
   return (
     <div className="space-y-3">
@@ -606,7 +579,7 @@ function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming
           <div className="grid grid-cols-2 gap-2">
             <DetailRow label="累计燃烧" value={`${formatNumber(weiToNumber(me?.totalBurnedHs), 2)} HS`} />
             <DetailRow label="燃烧价值" value={`${formatNumber(weiToNumber(me?.totalBurnedUsdt), 2)} USDT`} />
-            <DetailRow label="个人权益" value={me?.out || me?.personalClaimed ? "已领取，权重分红" : `${formatNumber(personalClaimable, 2)} USDT`} />
+            <DetailRow label="出局额度" value={me?.out || me?.personalClaimed ? "已出局，权重分红" : `${formatNumber(personalCap, 2)} USDT`} />
             <DetailRow label="每周奖励" value={`${formatNumber(pending, 2)} USDT`} />
             <DetailRow label="本周总燃烧" value={`${formatNumber(weiToNumber(round?.current.totalBurnHs), 2)} HS`} />
             <DetailRow label="Top10 周池" value={`${formatNumber(weiToNumber(round?.current.top10PoolUsdt), 2)} USDT`} />
@@ -619,11 +592,6 @@ function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming
               <Mini label="质押" value={breakdown.stakeUsdt} unit="USDT" />
               <Mini label="AI" value={breakdown.aiHs} unit="HS" />
             </div>
-          )}
-          {personalClaimable > 0 && !me?.out && !me?.personalClaimed && (
-            <Button onClick={claimPersonalBurn} disabled={claiming === "burn-personal"} variant="outline" className="w-full">
-              {claiming === "burn-personal" ? <Loader2 className="h-4 w-4 animate-spin" /> : "领取个人燃烧权益"}
-            </Button>
           )}
           {(pending > 0 || pendingHs > 0) && <Button onClick={claimBurn} disabled={claiming === "burn"} className="w-full">{claiming === "burn" ? <Loader2 className="h-4 w-4 animate-spin" /> : "领取燃烧奖励"}</Button>}
         </CardContent>
