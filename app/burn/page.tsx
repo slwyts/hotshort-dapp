@@ -382,8 +382,10 @@ export default function BurnPage() {
             <div className="grid grid-cols-2 gap-1.5 text-center">
               <Stat label={t("burn.stat.total")} value={formatNumber(totalBurn, 0)} unit="HS" />
               <Stat label={t("burn.stat.totalValue")} value={formatNumber(totalBurnUsdt, 2)} unit="USDT" />
-              <Stat label={t("burn.stat.personalClaimable")} value={formatNumber(personalClaimableUsdt, 2)} unit="USDT" accent />
-              <Stat label={t("burn.stat.weeklyClaimable")} value={formatNumber(burnPendingUsdt, 2)} unit="USDT" />
+              {!me.out && !me.personalClaimed
+                ? <Stat label={t("burn.stat.personalClaimable")} value={formatNumber(personalClaimableUsdt, 2)} unit="USDT" accent />
+                : <Stat label={t("burn.stat.weeklyClaimable")} value={formatNumber(burnPendingUsdt, 2)} unit="USDT" accent />}
+              <Stat label={t("burn.stat.personalCap")} value={formatNumber(weiToNumber(me.personalCapUsdt), 2)} unit="USDT" />
             </div>
           )}
 
