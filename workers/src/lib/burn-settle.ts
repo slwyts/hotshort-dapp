@@ -7,62 +7,12 @@ import { readTokenBalance } from "./token-balance";
 import {
   BURN_ALLOCATION_BPS,
   AI_AIRDROP_BURN_WEIGHT_BPS,
-  BURN_PROMOTION_ACTIVATE_USDT,
-  BURN_PROMOTION_GEN1_BPS,
-  BURN_PROMOTION_GEN2_BPS,
   BURN_WEEKLY_PAYOUT_BPS,
   STAKE_BURN_DIVIDEND_MIN_HS_USDT,
   STAKE_BURN_DIVIDEND_MIN_MONTHS,
   BPS_DENOMINATOR,
   type StakeAsset,
 } from "@/lib/constants/business-rules";
-
-async function ownerAddress(env: Env): Promise<string> {
-  const { readVaultOwner } = await import("./vault-owner");
-  return readVaultOwner(env);
-}
-
-async function isBurnPromotionActive(env: Env, user: string, minBurnUsdt: bigint): Promise<boolean> {
-  const row = await env.DB.prepare("SELECT total_burned_usdt FROM burn_personal_status WHERE user = ?")
-    .bind(user.toLowerCase())
-    .first<{ total_burned_usdt: string }>();
-  return BigInt(row?.total_burned_usdt ?? "0") >= minBurnUsdt;
-}
-
-async function insertReferralReward(env: Env, params: {
-  user: string;
-  sourceUser: string;
-  kind: string;
-  amount: bigint;
-  basis: bigint;
-  sourceRef: string;
-  now: number;
-}): Promise<void> {
-  if (params.amount <= 0n) return;
-  await env.DB.prepare(
-    `INSERT INTO referral_rewards
-       (id, user, source_user, kind, reward_token, reward_amount, basis_amount, basis_kind, source_ref, earned_at)
-    VALUES (?, ?, ?, ?, 'USDT', ?, ?, 'burn-usdt', ?, ?)`,
-  )
-    .bind(
-      ulid(),
-      params.user.toLowerCase(),
-      params.sourceUser.toLowerCase(),
-      params.kind,
-      params.amount.toString(),
-      params.basis.toString(),
-      params.sourceRef,
-      params.now,
-    )
-    .run();
-}
-
-async function directUpperOf(env: Env, user: string): Promise<string | null> {
-  const row = await env.DB.prepare("SELECT level1 FROM referral_paths WHERE user = ?")
-    .bind(user.toLowerCase())
-    .first<{ level1: string | null }>();
-  return row?.level1?.toLowerCase() ?? null;
-}
 
 async function hasMinHsHolding(env: Env, user: string, minUsdt: bigint): Promise<boolean> {
   const hs = await readTokenBalance(env, env.HS_TOKEN.toLowerCase() as `0x${string}`, user as `0x${string}`).catch(() => 0n);
@@ -169,49 +119,8 @@ export async function settleBurnRound(env: Env): Promise<{ round: number; total:
       .run();
   }
 
-  // 20% 权重分红：按本周燃烧额占比分给燃烧者。
-  for (const u of userBurns.entries()) {
-    const [user, burn] = u;
-    const reward = totalBurnUsdt > 0n ? (weight * burn.burnUsdt) / totalBurnUsdt : 0n;
-    await addRewardClaim(env, {
-      user,
-      kind: "burn-weight",
-      token: "USDT",
-      amount: reward,
-      round,
-      sourceRef: `burn-weight:${round}`,
-      now,
-    });
-  }
-
-  // 15% 推广奖励：一代 10%，二代 5%；未激活或无上级归官方。
-  const official = await ownerAddress(env);
-  const minPromotionBurn = BigInt(BURN_PROMOTION_ACTIVATE_USDT) * 10n ** 18n;
-  for (const row of burnRows.results ?? []) {
-    const amount = BigInt(row.usdt_value);
-    const gen1 = row.referrer?.toLowerCase() || official;
-    const gen2 = gen1 === official ? official : await directUpperOf(env, gen1) ?? official;
-    const gen1Active = gen1 === official || (!out.has(gen1) && await isBurnPromotionActive(env, gen1, minPromotionBurn));
-    const gen2Active = gen2 === official || (!out.has(gen2) && await isBurnPromotionActive(env, gen2, minPromotionBurn));
-    await insertReferralReward(env, {
-      user: gen1Active ? gen1 : official,
-      sourceUser: row.user,
-      kind: "burn-gen1",
-      amount: (amount * BigInt(BURN_PROMOTION_GEN1_BPS)) / BigInt(BPS_DENOMINATOR),
-      basis: amount,
-      sourceRef: row.id,
-      now,
-    });
-    await insertReferralReward(env, {
-      user: gen2Active ? gen2 : official,
-      sourceUser: row.user,
-      kind: "burn-gen2",
-      amount: (amount * BigInt(BURN_PROMOTION_GEN2_BPS)) / BigInt(BPS_DENOMINATOR),
-      basis: amount,
-      sourceRef: row.id,
-      now,
-    });
-  }
+  // 注：20% 权重分红与 15% 推广奖励已改为「每笔燃烧实时发放」（见 burn-realtime.ts），
+  // 不再于周结算中分配，避免重复发放。本函数只保留前十抢榜、质押、AI 三类周期结算。
 
   // 5% 质押分红：6 个月及以上订单，按本金 USDT 价值占比，且钱包 HS 持仓满足 10U。
   const minStakeHsValue = BigInt(STAKE_BURN_DIVIDEND_MIN_HS_USDT) * 10n ** 18n;

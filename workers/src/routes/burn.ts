@@ -11,6 +11,7 @@ import { markRewardRowsSigned, type RewardClaimRow } from "../lib/reward-claims"
 import { readTokenBalance } from "../lib/token-balance";
 import { verifyVaultBurn, verifyVaultClaim } from "../lib/vault-events";
 import { hsWeiToUsdtSnapshot } from "../lib/pricing";
+import { distributeBurnRealtime, computeWeightClaimable, settleWeightToRewardClaim } from "../lib/burn-realtime";
 import {
   BURN_ALLOCATION_BPS,
   BURN_AIRDROP_MIN_USDT,
@@ -188,8 +189,13 @@ burn.get("/me", async (c) => {
   const personalClaimed = await hasClaimedPersonalBurn(c.env, user);
   const personalCapUsdt = status.totalUsdt * 2n;
   const pending = await collectPendingBurnRewards(c.env, user, !!status.out);
+  // 权重分红已实时化为累加器，叠加当前可领的权重收益（活跃/出局用户都享有）。
+  const weightLive = await computeWeightClaimable(c.env, user);
+  const burnPendingUsdt = pending.burnPendingUsdt + weightLive;
+  const weightRewardUsdt = pending.weightRewardUsdt + weightLive;
+  const personalEligibleUsdt = pending.personalEligibleUsdt + weightLive;
   const capRemainingUsdt = personalCapUsdt > status.claimedUsdt ? personalCapUsdt - status.claimedUsdt : 0n;
-  const personalClaimableUsdt = !status.out && !personalClaimed ? minBigInt(pending.personalEligibleUsdt, capRemainingUsdt) : 0n;
+  const personalClaimableUsdt = !status.out && !personalClaimed ? minBigInt(personalEligibleUsdt, capRemainingUsdt) : 0n;
   const promotionActivationUsdt = BigInt(BURN_PROMOTION_ACTIVATE_USDT) * 10n ** 18n;
 
   const airdrop = await c.env.DB.prepare(
@@ -208,11 +214,11 @@ burn.get("/me", async (c) => {
     out: !!status.out,
     promotionActive: status.totalUsdt >= promotionActivationUsdt,
     promotionActivationUsdt: promotionActivationUsdt.toString(),
-    burnPendingUsdt: pending.burnPendingUsdt.toString(),
+    burnPendingUsdt: burnPendingUsdt.toString(),
     burnPendingHs: pending.burnPendingHs.toString(),
     pendingBreakdown: {
       top10Usdt: pending.top10RewardUsdt.toString(),
-      weightUsdt: pending.weightRewardUsdt.toString(),
+      weightUsdt: weightRewardUsdt.toString(),
       promotionUsdt: pending.referralRewardUsdt.toString(),
       stakeUsdt: pending.stakeRewardUsdt.toString(),
       aiHs: pending.aiRewardHs.toString(),
@@ -349,17 +355,12 @@ burn.post("/record", async (c) => {
     .bind(id, user, amount.toString(), snapshot.usdtWei.toString(), snapshot.priceWei.toString(), referrer, now, body.sourceTxHash)
     .run();
 
-  // 累计燃烧额；个人燃烧权益领取会单独触发出局。
+  // 实时分配：权重累加器 + 推广直发 + 黑洞记账（累计燃烧额也在此处更新）。
+  await ensurePersonalRow(c.env, user);
+  await distributeBurnRealtime(c.env);
   const status = await ensurePersonalRow(c.env, user);
-  const totalHs = status.totalHs + amount;
-  const totalUsdt = status.totalUsdt + snapshot.usdtWei;
-  await c.env.DB.prepare(
-    "UPDATE burn_personal_status SET total_burned_hs = ?, total_burned_usdt = ?, updated_at = ? WHERE user = ?",
-  )
-    .bind(totalHs.toString(), totalUsdt.toString(), now, user)
-    .run();
 
-  return c.json({ id, totalBurnedHs: totalHs.toString(), totalBurnedUsdt: totalUsdt.toString(), out: !!status.out });
+  return c.json({ id, totalBurnedHs: status.totalHs.toString(), totalBurnedUsdt: status.totalUsdt.toString(), out: !!status.out });
 });
 
 /**
@@ -380,6 +381,8 @@ burn.post("/claim/top10", async (c) => {
   const existing = await getExistingSignatureForUserReason(c.env, user as Address, reason, now);
   if (existing) return c.json(existing);
 
+  // 领取前把权重累加器收益结算成一条 burn-weight 待领行，复用既有签名路径。
+  await settleWeightToRewardClaim(c.env, user);
   const pending = await collectPendingBurnRewards(c.env, user, out);
 
   const usdtToken = c.env.USDT_TOKEN.toLowerCase() as Address;
@@ -445,6 +448,8 @@ burn.post("/claim/personal", async (c) => {
 
   const personalCapUsdt = status.totalUsdt * 2n;
   const capRemainingUsdt = personalCapUsdt > status.claimedUsdt ? personalCapUsdt - status.claimedUsdt : 0n;
+  // 领取前结算权重累加器收益，确保个人领取一并打包。
+  await settleWeightToRewardClaim(c.env, user);
   const pending = await collectPendingBurnRewards(c.env, user, false);
   const amount = minBigInt(pending.personalEligibleUsdt, capRemainingUsdt);
   if (amount <= 0n) return c.json({ amount: "0", error: "no claimable burn dividends" }, 400);

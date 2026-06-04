@@ -6,6 +6,7 @@ import { releaseDueAiStock } from "../lib/ai-releases";
 import { syncStockQuote } from "../lib/stocks";
 import { drawLottery } from "../lib/lottery-draw";
 import { settleBurnRound } from "../lib/burn-settle";
+import { distributeBurnRealtime } from "../lib/burn-realtime";
 import { advanceTestNowSeconds, isTestMode, nowSeconds, setTestNowSeconds } from "../lib/time";
 import {
   STAKE_ASSETS,
@@ -67,6 +68,9 @@ async function seedDefaults(env: Env, at: number): Promise<void> {
     ["lottery_ticket_price_usdt", "1"],
     ["lottery_weekly_refill_hs", "100000"],
     ["burn_current_round", "1"],
+    ["burn_weight_acc_per_share", "0"],
+    ["burn_weight_total_share", "0"],
+    ["burn_blackhole_total_usdt", "0"],
     ["lp_dividend_threshold_usdt", "100"],
     ["lp_dividend_last_at", "0"],
     ["lp_dividend_round", "0"],
@@ -148,6 +152,8 @@ testControl.post("/cron", async (c) => {
       return c.json({ job: body.job, result: await syncStockQuote(c.env) });
     case "lottery":
       return c.json({ job: body.job, result: await drawLottery(c.env) });
+    case "burn-realtime":
+      return c.json({ job: body.job, result: await distributeBurnRealtime(c.env) });
     case "burn-weekly":
       return c.json({ job: body.job, result: await settleBurnRound(c.env) });
     case "weekly": {

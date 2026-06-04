@@ -180,22 +180,12 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
       )
       .run();
 
+    // 仅确保个人状态行存在；累计燃烧额与实时分配（权重/推广/黑洞）统一由
+    // distributeBurnRealtime 在 cron 中处理，避免在此处与 record 双写导致重复累计。
     await env.DB.prepare(
       "INSERT OR IGNORE INTO burn_personal_status (user, updated_at) VALUES (?, ?)",
     )
       .bind(user, Math.floor(Date.now() / 1000))
-      .run();
-    const status = await env.DB.prepare(
-      "SELECT total_burned_hs, total_burned_usdt FROM burn_personal_status WHERE user = ?",
-    )
-      .bind(user)
-      .first<{ total_burned_hs: string; total_burned_usdt: string }>();
-    const totalBurnedHs = BigInt(status?.total_burned_hs ?? "0") + amount;
-    const totalBurnedUsdt = BigInt(status?.total_burned_usdt ?? "0") + snapshot.usdtWei;
-    await env.DB.prepare(
-      "UPDATE burn_personal_status SET total_burned_hs = ?, total_burned_usdt = ?, updated_at = ? WHERE user = ?",
-    )
-      .bind(totalBurnedHs.toString(), totalBurnedUsdt.toString(), Math.floor(Date.now() / 1000), user)
       .run();
   }
 

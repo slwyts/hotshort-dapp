@@ -227,6 +227,7 @@ CREATE TABLE IF NOT EXISTS lottery_commits (
 );
 
 -- 燃烧记录
+-- distributed: 0=未做实时分配（权重累加器/推广/黑洞），1=已分配。防止 record/indexer 双触发重复发放。
 CREATE TABLE IF NOT EXISTS burn_records (
   id TEXT PRIMARY KEY,
   user TEXT NOT NULL,
@@ -235,12 +236,14 @@ CREATE TABLE IF NOT EXISTS burn_records (
   hs_price_usdt_wei TEXT NOT NULL,
   referrer TEXT,
   settled_round INTEGER,
+  distributed INTEGER NOT NULL DEFAULT 0,
   claimed_individual INTEGER NOT NULL DEFAULT 0,
   burned_at INTEGER NOT NULL,
   source_tx_hash TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_burn_user ON burn_records(user, claimed_individual);
 CREATE INDEX IF NOT EXISTS idx_burn_records_round ON burn_records(settled_round);
+CREATE INDEX IF NOT EXISTS idx_burn_records_distributed ON burn_records(distributed);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_burn_source_tx ON burn_records(source_tx_hash);
 
 -- 燃烧周结算汇总
@@ -261,11 +264,14 @@ CREATE TABLE IF NOT EXISTS burn_rounds (
 );
 
 -- 个人燃烧状态
+-- weight_reward_debt / weight_pending_usdt: 权重分红 MasterChef 累加器的个人债务与已结算待领额。
 CREATE TABLE IF NOT EXISTS burn_personal_status (
   user TEXT PRIMARY KEY,
   total_burned_hs TEXT NOT NULL DEFAULT '0',
   total_burned_usdt TEXT NOT NULL DEFAULT '0',
   total_personal_claimed_usdt TEXT NOT NULL DEFAULT '0',
+  weight_reward_debt TEXT NOT NULL DEFAULT '0',
+  weight_pending_usdt TEXT NOT NULL DEFAULT '0',
   out_at INTEGER,
   updated_at INTEGER NOT NULL
 );
@@ -371,6 +377,9 @@ INSERT OR IGNORE INTO admin_config (key, value, updated_by, updated_at) VALUES
   ('lottery_weekly_refill_hs', '100000', 'init', strftime('%s','now')),
   ('lottery_current_round', '1', 'init', strftime('%s','now')),
   ('burn_current_round', '1', 'init', strftime('%s','now')),
+  ('burn_weight_acc_per_share', '0', 'init', strftime('%s','now')),
+  ('burn_weight_total_share', '0', 'init', strftime('%s','now')),
+  ('burn_blackhole_total_usdt', '0', 'init', strftime('%s','now')),
   ('lp_dividend_threshold_usdt', '100', 'init', strftime('%s','now')),
   ('lp_dividend_last_at', '0', 'init', strftime('%s','now')),
   ('lp_dividend_round', '0', 'init', strftime('%s','now')),
