@@ -209,16 +209,9 @@ export function OrderList({ refreshKey }: { refreshKey: number }) {
                       </>
                     )}
                   </div>
-                  {!o.claimed && matured && (
-                    <Button size="sm" onClick={() => claim(o.id)}>
-                      {t("stake.claimYield")}
-                    </Button>
-                  )}
-                  {!o.claimed && !matured && (
-                    <span className="flex items-center gap-1 text-xs text-white/30">
-                      <Lock className="h-3 w-3" /> {t("stake.holding")}
-                    </span>
-                  )}
+                  <Button size="sm" onClick={() => claim(o.id)} disabled={!!o.claimed || !matured}>
+                    {o.claimed ? t("stake.claimed") : matured ? t("stake.claimYield") : <><Lock className="h-3 w-3" /> {t("stake.holding")}</>}
+                  </Button>
                 </div>
               </div>
             );

@@ -126,6 +126,21 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
     if (Number(log.args.reason) === 8 && log.args.user && log.args.amount) {
       const user = log.args.user.toLowerCase();
       await env.DB.prepare(
+        "UPDATE burn_top10_settlements SET claimed = 1 WHERE user = ? AND claim_nonce = ? AND claimed = 0",
+      )
+        .bind(user, nonce)
+        .run();
+      await env.DB.prepare(
+        "UPDATE reward_claims SET claimed = 1 WHERE user = ? AND claim_nonce = ? AND claimed = 0",
+      )
+        .bind(user, nonce)
+        .run();
+      await env.DB.prepare(
+        "UPDATE referral_rewards SET claimed = 1 WHERE user = ? AND claim_nonce = ? AND claimed = 0",
+      )
+        .bind(user, nonce)
+        .run();
+      await env.DB.prepare(
         "UPDATE burn_records SET claimed_individual = 1 WHERE user = ? AND claimed_individual = 0",
       )
         .bind(user)

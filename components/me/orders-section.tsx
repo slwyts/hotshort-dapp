@@ -338,6 +338,37 @@ export function OrdersSection() {
     }
   };
 
+  const claimPersonalBurn = async () => {
+    const token = jwt ?? (await signIn());
+    if (!token) return;
+    setClaiming("burn-personal");
+    try {
+      Swal.fire({ title: t("burn.personalClaim.preparing"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
+      const sig = await api.post<ClaimSig>(endpoints.burnClaimPersonal, {}, token);
+      if (!sig.signature || !sig.token || sig.amount === "0") {
+        await Swal.fire({ icon: "info", title: t("burn.claim.noClaim.title"), text: t("burn.personalClaim.noClaim"), background: "#141419", color: "#fff" });
+        return;
+      }
+      Swal.fire({ title: t("burn.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
+      const txHash = await sendVaultClaim(sig);
+      await api.post(endpoints.burnClaimPersonalConfirm, { txHash, nonce: sig.nonce }, token);
+      await Swal.fire({
+        icon: "success",
+        title: t("burn.personalClaim.success.title"),
+        html: `${t("burn.personalClaim.success.body", { amount: formatNumber(weiToNumber(sig.amount), 2) })}<br/><span class="text-xs text-white/50">${displayTx(txHash)}</span>`,
+        background: "#141419",
+        color: "#fff",
+        confirmButtonColor: "#b829ff",
+      });
+      await refresh();
+    } catch (e) {
+      Swal.close();
+      await Swal.fire({ icon: "error", title: t("error.title"), text: (e as Error).message, background: "#141419", color: "#fff" });
+    } finally {
+      setClaiming(null);
+    }
+  };
+
   if (!isConnected) {
     return <Card><CardContent className="py-12 text-center text-sm text-white/50">{t("me.orders.connect")}</CardContent></Card>;
   }
@@ -369,7 +400,7 @@ export function OrdersSection() {
       ) : activeType === "lottery" ? (
         <LotteryOrders tickets={tickets} expanded={expanded} setExpanded={setExpanded} claimLottery={claimLottery} claiming={claiming} />
       ) : (
-        <BurnOrders me={burnMe} round={burnRound} records={burnRecords} claimBurn={claimBurn} claiming={claiming} />
+        <BurnOrders me={burnMe} round={burnRound} records={burnRecords} claimBurn={claimBurn} claimPersonalBurn={claimPersonalBurn} claiming={claiming} />
       )}
     </div>
   );
@@ -409,6 +440,7 @@ function StakeOrders({ orders, expanded, setExpanded, claimStake, claiming }: {
       {orders.map((order) => {
         const principal = weiToNumber(order.amount);
         const matured = serverNow != null && serverNow >= order.matures_at;
+        const claimLabel = order.claimed ? "已领取" : matured ? "领取" : "未到期";
         const expectedAsset = (principal * order.monthly_rate_bps * order.lock_months) / 10_000;
         const expectedFuel = expectedAsset * 0.05;
         const expectedNet = expectedAsset - expectedFuel;
@@ -426,7 +458,7 @@ function StakeOrders({ orders, expanded, setExpanded, claimStake, claiming }: {
                 </div>
                 <div className="flex items-center gap-2 text-right">
                   <div>
-                    <div className="text-[10px] text-white/35">返还(含本金)</div>
+                    <div className="text-[10px] text-white/35">到期结算</div>
                     <div className="font-black text-[#b829ff]">≈ {formatNumber(principal + expectedAsset, 4)} {order.asset} 等值</div>
                   </div>
                   <ChevronDown className={cn("h-4 w-4 text-white/35 transition", open && "rotate-180")} />
@@ -437,13 +469,15 @@ function StakeOrders({ orders, expanded, setExpanded, claimStake, claiming }: {
                   <div className="grid grid-cols-2 gap-2">
                     <DetailRow label="锁仓周期" value={`${order.lock_months} 个月`} />
                     <DetailRow label="月化收益" value={bpsToPercent(order.monthly_rate_bps)} />
-                    <DetailRow label="预计到账" value={`≈ ${formatNumber(principal + expectedNet, 4)} ${order.asset} 等值 HS（含本金）`} />
+                    <DetailRow label="预计到账" value={`≈ ${formatNumber(principal + expectedNet, 4)} ${order.asset} 等值 HS`} />
                     <DetailRow label="开始时间" value={dateText(order.started_at)} />
                     <DetailRow label="到期时间" value={dateText(order.matures_at)} />
                     <DetailRow label="燃料销毁" value={`约 ${formatNumber(expectedFuel, 4)} ${order.asset} 等值 HS`} />
                     <DetailRow label="交易" value={displayTx(order.source_tx_hash)} />
                   </div>
-                  {!order.claimed && matured && <Button onClick={() => claimStake(order.id)} disabled={claiming === order.id} className="w-full">{claiming === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "领取(含本金)"}</Button>}
+                  <Button onClick={() => claimStake(order.id)} disabled={!!order.claimed || !matured || claiming === order.id} className="w-full">
+                    {claiming === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : claimLabel}
+                  </Button>
                 </div>
               )}
             </CardContent>
@@ -527,6 +561,7 @@ function LotteryOrders({ tickets, expanded, setExpanded, claimLottery, claiming 
       {tickets.map((ticket) => {
         const prize = weiToNumber(ticket.prize_hs);
         const claimable = prize > 0 && !ticket.claimed;
+        const claimLabel = !ticket.drawn_at ? "待开奖" : ticket.claimed ? "已领取" : prize > 0 ? "领取奖金" : "未中奖";
         const open = expanded === ticket.id;
         const status = !ticket.drawn_at ? "待开奖" : prize > 0 ? ticket.claimed ? "已领取" : "中奖待领" : "未中奖";
         return (
@@ -550,7 +585,9 @@ function LotteryOrders({ tickets, expanded, setExpanded, claimLottery, claiming 
                     <DetailRow label="命中" value={ticket.hit_digits ?? "—"} />
                     <DetailRow label="开奖时间" value={dateText(ticket.drawn_at)} />
                   </div>
-                  {claimable && <Button onClick={() => claimLottery(ticket.id)} disabled={claiming === ticket.id} className="w-full">{claiming === ticket.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "领取奖金"}</Button>}
+                  <Button onClick={() => claimLottery(ticket.id)} disabled={!claimable || claiming === ticket.id} className="w-full">
+                    {claiming === ticket.id ? <Loader2 className="h-4 w-4 animate-spin" /> : claimLabel}
+                  </Button>
                 </div>
               )}
             </CardContent>
@@ -561,16 +598,17 @@ function LotteryOrders({ tickets, expanded, setExpanded, claimLottery, claiming 
   );
 }
 
-function BurnOrders({ me, round, records, claimBurn, claiming }: {
+function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming }: {
   me: BurnMe | null;
   round: BurnRound | null;
   records: BurnRecord[];
   claimBurn: () => void;
+  claimPersonalBurn: () => void;
   claiming: string | null;
 }) {
   const pending = weiToNumber(me?.burnPendingUsdt);
   const pendingHs = weiToNumber(me?.burnPendingHs);
-  const personalCap = weiToNumber(me?.personalCapUsdt);
+  const personalClaimable = weiToNumber(me?.personalClaimableUsdt);
   const breakdown = me?.pendingBreakdown;
   return (
     <div className="space-y-3">
@@ -579,8 +617,8 @@ function BurnOrders({ me, round, records, claimBurn, claiming }: {
           <div className="grid grid-cols-2 gap-2">
             <DetailRow label="累计燃烧" value={`${formatNumber(weiToNumber(me?.totalBurnedHs), 2)} HS`} />
             <DetailRow label="燃烧价值" value={`${formatNumber(weiToNumber(me?.totalBurnedUsdt), 2)} USDT`} />
-            <DetailRow label="出局额度" value={me?.out || me?.personalClaimed ? "已出局，权重分红" : `${formatNumber(personalCap, 2)} USDT`} />
-            <DetailRow label="每周奖励" value={`${formatNumber(pending, 2)} USDT`} />
+            <DetailRow label="当前可领" value={me?.out || me?.personalClaimed ? "已出局，权重分红" : `${formatNumber(personalClaimable, 2)} USDT`} />
+            <DetailRow label="权重分红" value={`${formatNumber(pending, 2)} USDT`} />
             <DetailRow label="本周总燃烧" value={`${formatNumber(weiToNumber(round?.current.totalBurnHs), 2)} HS`} />
             <DetailRow label="Top10 周池" value={`${formatNumber(weiToNumber(round?.current.top10PoolUsdt), 2)} USDT`} />
           </div>
@@ -593,7 +631,12 @@ function BurnOrders({ me, round, records, claimBurn, claiming }: {
               <Mini label="AI" value={breakdown.aiHs} unit="HS" />
             </div>
           )}
-          {(pending > 0 || pendingHs > 0) && <Button onClick={claimBurn} disabled={claiming === "burn"} className="w-full">{claiming === "burn" ? <Loader2 className="h-4 w-4 animate-spin" /> : "领取燃烧奖励"}</Button>}
+          {me && !me.out && !me.personalClaimed && (
+            <Button onClick={claimPersonalBurn} disabled={claiming === "burn-personal" || personalClaimable <= 0} variant="outline" className="w-full">
+              {claiming === "burn-personal" ? <Loader2 className="h-4 w-4 animate-spin" /> : personalClaimable > 0 ? "领取分红并出局" : "暂无可领分红"}
+            </Button>
+          )}
+          {me?.out && <Button onClick={claimBurn} disabled={claiming === "burn" || (pending <= 0 && pendingHs <= 0)} className="w-full">{claiming === "burn" ? <Loader2 className="h-4 w-4 animate-spin" /> : (pending > 0 || pendingHs > 0) ? "领取权重分红" : "暂无权重分红"}</Button>}
         </CardContent>
       </Card>
       {records.length === 0 ? <EmptyState href="/burn" text="还没有燃烧记录" /> : records.map((record) => (

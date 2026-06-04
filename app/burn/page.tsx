@@ -254,6 +254,58 @@ export default function BurnPage() {
     }
   };
 
+  const claimPersonal = async () => {
+    const token = jwt ?? (await signIn());
+    if (!token) return;
+    try {
+      Swal.fire({ title: t("burn.personalClaim.preparing"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
+      const sig = await api.post<{
+        token?: string;
+        tokens?: string[];
+        recipients?: string[];
+        amounts?: string[];
+        amount: string;
+        nonce?: string;
+        deadline?: number;
+        reason?: number;
+        signature?: string;
+      }>(endpoints.burnClaimPersonal, {}, token);
+      if (!sig.signature || !sig.token) {
+        await Swal.fire({ icon: "info", title: t("burn.claim.noClaim.title"), text: t("burn.personalClaim.noClaim"), background: "#141419", color: "#fff" });
+        return;
+      }
+      Swal.fire({ title: t("burn.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
+      const txHash = await writeContractAsync({
+        address: vault,
+        abi: VAULT_ABI,
+        functionName: "claim",
+        args: [
+          (sig.tokens ?? sig.amounts!.map(() => sig.token!)) as `0x${string}`[],
+          sig.recipients as `0x${string}`[],
+          sig.amounts!.map((amount) => BigInt(amount)),
+          BigInt(sig.nonce!),
+          BigInt(sig.deadline!),
+          sig.reason!,
+          sig.signature as `0x${string}`,
+        ],
+      });
+      await waitForSuccessfulTx(txHash);
+      await api.post(endpoints.burnClaimPersonalConfirm, { txHash, nonce: sig.nonce }, token);
+      await Swal.fire({
+        icon: "success",
+        title: t("burn.personalClaim.success.title"),
+        html: `${t("burn.personalClaim.success.body", { amount: formatNumber(Number(formatUnits(BigInt(sig.amount), 18)), 2) })}<br/>
+               <a href="https://bscscan.com/tx/${txHash}" target="_blank" rel="noopener" class="text-[#00c6ff] text-xs">${shortenAddress(txHash)}</a>`,
+        background: "#141419",
+        color: "#fff",
+        confirmButtonColor: "#b829ff",
+      });
+      await refresh();
+    } catch (e) {
+      await Swal.fire({ icon: "error", title: t("error.title"), text: (e as Error).message, background: "#141419", color: "#fff" });
+    }
+  };
+
   const submitAirdrop = async () => {
     if (!hotshortAccount.trim()) return;
     const token = jwt ?? (await signIn());
@@ -282,7 +334,7 @@ export default function BurnPage() {
   const totalBurnUsdt = weiToNumber(me?.totalBurnedUsdt);
   const burnPendingUsdt = weiToNumber(me?.burnPendingUsdt);
   const burnPendingHs = weiToNumber(me?.burnPendingHs);
-  const personalCapUsdt = weiToNumber(me?.personalCapUsdt);
+  const personalClaimableUsdt = weiToNumber(me?.personalClaimableUsdt);
   const personalClaimedUsdt = weiToNumber(me?.personalClaimedUsdt);
   const currentWeeklyBurn = weiToNumber(round?.current?.totalBurnHs);
   const currentWeeklyBurnUsdt = weiToNumber(round?.current?.totalBurnUsdt);
@@ -330,7 +382,7 @@ export default function BurnPage() {
             <div className="grid grid-cols-2 gap-1.5 text-center">
               <Stat label={t("burn.stat.total")} value={formatNumber(totalBurn, 0)} unit="HS" />
               <Stat label={t("burn.stat.totalValue")} value={formatNumber(totalBurnUsdt, 2)} unit="USDT" />
-              <Stat label={t("burn.stat.personalCap")} value={formatNumber(personalCapUsdt, 2)} unit="USDT" accent />
+              <Stat label={t("burn.stat.personalClaimable")} value={formatNumber(personalClaimableUsdt, 2)} unit="USDT" accent />
               <Stat label={t("burn.stat.weeklyClaimable")} value={formatNumber(burnPendingUsdt, 2)} unit="USDT" />
             </div>
           )}
@@ -354,9 +406,14 @@ export default function BurnPage() {
             </div>
           )}
 
-          {me && (burnPendingUsdt > 0 || burnPendingHs > 0) && (
-            <Button onClick={claimTop10} variant="outline" className="w-full">
-              <Award className="h-4 w-4" /> {t("burn.claimWeekly")}
+          {me && !me.out && !me.personalClaimed && (
+            <Button onClick={claimPersonal} disabled={personalClaimableUsdt <= 0} variant="outline" className="w-full border-[#ef4444]/40 text-red-100 hover:bg-[#ef4444]/10">
+              <Flame className="h-4 w-4" /> {personalClaimableUsdt > 0 ? t("burn.claimPersonal") : t("burn.claimPersonalPending")}
+            </Button>
+          )}
+          {me && me.out && (
+            <Button onClick={claimTop10} disabled={burnPendingUsdt <= 0 && burnPendingHs <= 0} variant="outline" className="w-full">
+              <Award className="h-4 w-4" /> {(burnPendingUsdt > 0 || burnPendingHs > 0) ? t("burn.claimWeekly") : t("burn.claimWeeklyPending")}
             </Button>
           )}
         </CardContent>

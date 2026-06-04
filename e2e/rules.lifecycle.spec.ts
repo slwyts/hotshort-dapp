@@ -110,13 +110,6 @@ type BurnMeResponse = {
   eligibleAirdrop: boolean;
 };
 
-type BurnClaimResponse = VaultClaim & {
-  amount: string;
-  top10Rows: number;
-  rewardRows: number;
-  referralRows: number;
-};
-
 async function resetAndFund(accounts: TestAccount[]): Promise<Address> {
   const vault = getVaultAddress();
   await resetE2eState(await latestBlockTimestamp());
@@ -564,7 +557,9 @@ test.describe("README rule lifecycle scripts", () => {
     expect(aliceBurnStatus.personalClaimed).toBe(false);
     expect(aliceBurnStatus.out).toBe(false);
     expect(BigInt(aliceBurnStatus.personalCapUsdt)).toBe(expectedAlicePersonalUsdt);
-    expect(BigInt(aliceBurnStatus.personalClaimableUsdt)).toBe(0n);
+    const alicePersonalClaimableUsdt = BigInt(aliceBurnStatus.personalClaimableUsdt);
+    expect(alicePersonalClaimableUsdt).toBeGreaterThan(0n);
+    expect(alicePersonalClaimableUsdt).toBeLessThanOrEqual(expectedAlicePersonalUsdt);
 
     const aliceStockRewardClaim = await apiRequest<{
       token: string;
@@ -580,44 +575,42 @@ test.describe("README rule lifecycle scripts", () => {
     expect(aliceStockRewardClaim.burnStockRewards).toBeGreaterThan(0);
     expect(BigInt(aliceStockRewardClaim.amount)).toBeGreaterThan(0n);
 
-    const aliceBurnClaim = await apiRequest<BurnClaimResponse>("/burn/claim/top10", {
+    const blockedActiveBurnClaim = await apiStatus("/burn/claim/top10", {
       method: "POST",
       headers: bearer(aliceJwt),
     });
-    expect(aliceBurnClaim.reason).toBe(4);
-    expect(aliceBurnClaim.top10Rows).toBeGreaterThan(0);
-    expect(aliceBurnClaim.referralRows).toBeGreaterThan(0);
-    expect(BigInt(aliceBurnClaim.amount)).toBeGreaterThan(0n);
-    await claimFromVault(ALICE, aliceBurnClaim);
-    await expectNonceConsumed(aliceBurnClaim);
+    expect(blockedActiveBurnClaim.status).toBe(400);
+    expect(blockedActiveBurnClaim.body).toMatchObject({ amount: "0", error: "claim personal burn dividends first" });
 
-    const aliceAfterWeeklyClaim = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
-    expect(aliceAfterWeeklyClaim.personalClaimed).toBe(false);
-    expect(aliceAfterWeeklyClaim.out).toBe(false);
-    expect(BigInt(aliceAfterWeeklyClaim.personalCapUsdt)).toBe(expectedAlicePersonalUsdt);
-    expect(BigInt(aliceAfterWeeklyClaim.personalClaimableUsdt)).toBe(0n);
-
-    const alicePersonalClaim = await apiStatus("/burn/claim/personal", {
+    const alicePersonalClaim = await apiRequest<VaultClaim & { amount: string; personalClaimedUsdt: string }>("/burn/claim/personal", {
       method: "POST",
       headers: bearer(aliceJwt),
     });
-    expect(alicePersonalClaim.status).toBe(400);
-    expect(alicePersonalClaim.body).toMatchObject({ amount: "0", error: "personal burn cap is not immediately claimable" });
+    expect(alicePersonalClaim.reason).toBe(8);
+    expect(alicePersonalClaim.token.toLowerCase()).toBe(USDT_TOKEN.toLowerCase());
+    expect(BigInt(alicePersonalClaim.amount)).toBe(alicePersonalClaimableUsdt);
+    expect(BigInt(alicePersonalClaim.personalClaimedUsdt)).toBe(alicePersonalClaimableUsdt);
+    const alicePersonalClaimTx = await claimFromVault(ALICE, alicePersonalClaim);
+    await expectNonceConsumed(alicePersonalClaim);
+    await apiRequest("/burn/claim/personal/confirm", {
+      method: "POST",
+      headers: bearer(aliceJwt),
+      body: JSON.stringify({ txHash: alicePersonalClaimTx, nonce: alicePersonalClaim.nonce }),
+    });
 
     const aliceAfterPersonalClaimAttempt = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
-    expect(aliceAfterPersonalClaimAttempt.personalClaimed).toBe(false);
-    expect(aliceAfterPersonalClaimAttempt.out).toBe(false);
+    expect(aliceAfterPersonalClaimAttempt.personalClaimed).toBe(true);
+    expect(aliceAfterPersonalClaimAttempt.out).toBe(true);
     expect(BigInt(aliceAfterPersonalClaimAttempt.personalCapUsdt)).toBe(expectedAlicePersonalUsdt);
     expect(BigInt(aliceAfterPersonalClaimAttempt.personalClaimableUsdt)).toBe(0n);
-    expect(BigInt(aliceAfterPersonalClaimAttempt.personalClaimedUsdt)).toBe(0n);
+    expect(BigInt(aliceAfterPersonalClaimAttempt.personalClaimedUsdt)).toBe(alicePersonalClaimableUsdt);
 
-    const charlieBurnClaim = await apiRequest<BurnClaimResponse>("/burn/claim/top10", {
+    const charlieActiveBurnClaim = await apiStatus("/burn/claim/top10", {
       method: "POST",
       headers: bearer(charlieJwt),
     });
-    expect(charlieBurnClaim.rewardRows).toBeGreaterThan(0);
-    await claimFromVault(CHARLIE, charlieBurnClaim);
-    await expectNonceConsumed(charlieBurnClaim);
+    expect(charlieActiveBurnClaim.status).toBe(400);
+    expect(charlieActiveBurnClaim.body).toMatchObject({ amount: "0", error: "claim personal burn dividends first" });
 
     const airdropSubmission = await apiRequest<{ id: string; created: boolean }>("/burn/airdrop/submit", {
       method: "POST",
