@@ -304,8 +304,9 @@ burn.get("/records", async (c) => {
  *   - 入参: { sourceTxHash, hsAmountWei, referrer? }
  */
 burn.post("/record", async (c) => {
-  const user = await requireUser(c);
-  if (!user) return c.json({ error: "unauthorized" }, 401);
+  const rawUser = await requireUser(c);
+  if (!rawUser) return c.json({ error: "unauthorized" }, 401);
+  const user = rawUser.toLowerCase();
   const bound = await requireBoundUser(c.env, user);
   if (!bound) return c.json({ error: "no upline" }, 403);
   const body = (await c.req.json().catch(() => ({}))) as {
