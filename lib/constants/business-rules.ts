@@ -114,6 +114,14 @@ export const AI_3GEN_DOWNGRADE_BPS = 5000; // 50%
 /** HS → 股票闪兑后立即可用，不进入 locked_stock。保留常量用于旧测试/旧 UI 兼容。 */
 export const AI_SWAP_LOCK_SECONDS = 0;
 
+/**
+ * WTO 股票买入/卖出手续费（bps）。
+ *   - 买入（HS → WTO 闪兑）：扣减得到的股票数量。
+ *   - 卖出（WTO → HS）：扣减到账的 HS 数量。
+ * 手续费部分不签发给用户，等同于留存在 Vault 合约内。
+ */
+export const WTO_TRADE_FEE_BPS = 300; // 3%
+
 // ===== §3 彩票（薄饼克隆） =====
 /** 周奖池补给（HS） */
 export const LOTTERY_WEEKLY_REFILL_HS = 100_000;

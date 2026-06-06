@@ -28,9 +28,16 @@ async function readConfig(env: Env): Promise<ConfigSnapshot> {
   };
 }
 
+/** 真随机 [0,1)：用 Web Crypto，避免 Workers 运行时 Math.random() 可能出现的近似恒定值。 */
+function secureRandomUnit(): number {
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  return buf[0] / 0x1_0000_0000; // [0, 1)
+}
+
 /**
  * §2.2 每日股票分红 cron
- *   1) 当日交易额 = 在 [volumeMin, volumeMax] 区间随机
+ *   1) 当日交易额 = 在 [volumeMin, volumeMax] 区间随机生成（每日不同）
  *   2) 总池 USDT = 交易额 × ratioBps / 10000
  *   3) 总池股数 = 总池 USDT / 股价
  *   4) 按 §2.2 五档比例（56/25/12/6/1%）切池
@@ -49,7 +56,7 @@ export async function settleAiDividend(env: Env): Promise<{ date: string; totalS
   const cfg = await readConfig(env);
   const stockPrice = await getStockPriceUsdt(env);
   if (cfg.volumeMin <= 0 || cfg.volumeMax < cfg.volumeMin) return null;
-  const targetVolumeUsdt = cfg.volumeMin + Math.random() * (cfg.volumeMax - cfg.volumeMin);
+  const targetVolumeUsdt = cfg.volumeMin + secureRandomUnit() * (cfg.volumeMax - cfg.volumeMin);
   const totalPoolUsdt = (targetVolumeUsdt * cfg.ratioBps) / BPS_DENOMINATOR;
   const totalPoolStockNum = totalPoolUsdt / stockPrice;
   const totalPoolStockWei = BigInt(Math.floor(totalPoolStockNum * 1e18));

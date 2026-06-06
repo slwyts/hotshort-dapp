@@ -16,6 +16,7 @@ import { api, endpoints } from "@/lib/api";
 import { VAULT_ABI } from "@/lib/contracts/abis";
 import { useContracts } from "@/lib/runtime-config";
 import { formatNumber, cn } from "@/lib/utils";
+import { WTO_TRADE_FEE_BPS, BPS_DENOMINATOR } from "@/lib/constants/business-rules";
 
 interface SellQuote {
   holdings: {
@@ -26,6 +27,8 @@ interface SellQuote {
   stockPriceUsdt: number;
   hsPriceUsdt: number;
   hsOut: string;
+  hsFee: string;
+  feeBps: number;
   usdtOut: string;
   enough: boolean;
 }
@@ -92,10 +95,13 @@ export default function AiSellPage() {
   const locked = quote ? weiToNumber(quote.holdings.lockedStock) : 0;
   const total = quote ? weiToNumber(quote.holdings.totalStock) : 0;
   const amountNum = Number(stockAmount);
-  const estimatedHs = useMemo(() => {
+  const feePercent = WTO_TRADE_FEE_BPS / 100;
+  const estimatedHsGross = useMemo(() => {
     if (!quote || !Number.isFinite(amountNum) || amountNum <= 0 || quote.hsPriceUsdt <= 0) return 0;
     return (amountNum * quote.stockPriceUsdt) / quote.hsPriceUsdt;
   }, [amountNum, quote]);
+  const estimatedHsFee = (estimatedHsGross * WTO_TRADE_FEE_BPS) / BPS_DENOMINATOR;
+  const estimatedHs = estimatedHsGross - estimatedHsFee;
   const estimatedUsdt = quote && Number.isFinite(amountNum) && amountNum > 0 ? amountNum * quote.stockPriceUsdt : 0;
   const insufficient = Number.isFinite(amountNum) && amountNum > available;
 
@@ -223,6 +229,7 @@ export default function AiSellPage() {
                 <Row label={t("ai.sell.hsPrice")} value={`$${formatNumber(quote.hsPriceUsdt, 6)}`} />
                 <div className="my-2 border-t border-white/5" />
                 <Row label={t("ai.sell.usdtValue")} value={`$${formatNumber(estimatedUsdt, 2)}`} />
+                <Row label={t("ai.sell.fee", { percent: feePercent })} value={`-${formatNumber(estimatedHsFee, 4)} HS`} />
                 <Row label={t("ai.sell.estimateHs")} value={`${formatNumber(estimatedHs, 4)} HS`} strong />
               </div>
 

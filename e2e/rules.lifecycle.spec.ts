@@ -439,15 +439,19 @@ test.describe("README rule lifecycle scripts", () => {
     const hsQuote = await apiRequest<{ priceUsdt: number }>("/oracle/hs-price");
     const stockQuote = await apiRequest<{ priceUsdt: number }>("/oracle/stock-price");
     const swapAmount = parseEther("1000");
-    const expectedSwapStock = (swapAmount * BigInt(Math.floor((hsQuote.priceUsdt / stockQuote.priceUsdt) * 1e18))) / parseEther("1");
+    const expectedSwapStockGross = (swapAmount * BigInt(Math.floor((hsQuote.priceUsdt / stockQuote.priceUsdt) * 1e18))) / parseEther("1");
+    // WTO 买入 3% 手续费（WTO_TRADE_FEE_BPS = 300）
+    const expectedSwapStockFee = (expectedSwapStockGross * 300n) / 10000n;
+    const expectedSwapStock = expectedSwapStockGross - expectedSwapStockFee;
     const swapTxHash = await depositToVault(ALICE, HS_TOKEN as Address, swapAmount, 5);
-    const swap = await apiRequest<{ id: string; stockOut: string; stockLocked: string; unlocksAt: null }>("/ai/swap", {
+    const swap = await apiRequest<{ id: string; stockOut: string; stockFee: string; stockLocked: string; unlocksAt: null }>("/ai/swap", {
       method: "POST",
       headers: bearer(aliceJwt),
       body: JSON.stringify({ sourceTxHash: swapTxHash, hsAmountWei: swapAmount.toString() }),
     });
     expect(beforeSwapTime.nowSeconds).toBeGreaterThan(0);
     expect(BigInt(swap.stockOut)).toBe(expectedSwapStock);
+    expect(BigInt(swap.stockFee)).toBe(expectedSwapStockFee);
     expect(BigInt(swap.stockLocked)).toBe(0n);
     expect(swap.unlocksAt).toBeNull();
     const afterSwapHoldings = await apiRequest<HoldingsResponse>("/ai/holdings", { headers: bearer(aliceJwt) });

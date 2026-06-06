@@ -19,6 +19,7 @@ import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
 import { useContracts } from "@/lib/runtime-config";
 import { formatNumber } from "@/lib/utils";
+import { WTO_TRADE_FEE_BPS, BPS_DENOMINATOR } from "@/lib/constants/business-rules";
 
 export default function SwapPage() {
   const { address, isConnected } = useAccount();
@@ -52,8 +53,11 @@ export default function SwapPage() {
     });
   }, []);
 
-  const stockOut =
+  const stockOutGross =
     hsPrice && stockPrice && stockPrice > 0 ? (Number(hs) * hsPrice) / stockPrice : 0;
+  const feePercent = WTO_TRADE_FEE_BPS / 100;
+  const stockFee = (stockOutGross * WTO_TRADE_FEE_BPS) / BPS_DENOMINATOR;
+  const stockOut = stockOutGross - stockFee;
 
   const submit = async () => {
     if (!isConnected || !address) {
@@ -182,6 +186,12 @@ export default function SwapPage() {
                 style={{ fontFamily: "Orbitron, sans-serif" }}
               >
                 {formatNumber(stockOut, 2)} {t("ai.swap.unit.shares")}
+              </span>
+            </div>
+            <div className="mt-1.5 flex items-center justify-between text-[11px]">
+              <span className="text-white/40">{t("ai.swap.fee", { percent: feePercent })}</span>
+              <span className="text-white/50 tabular-nums">
+                -{formatNumber(stockFee, 2)} {t("ai.swap.unit.shares")}
               </span>
             </div>
           </div>

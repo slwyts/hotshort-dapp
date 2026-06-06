@@ -150,6 +150,9 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
       )
         .bind(log.args.amount.toString(), usedAt, usedAt, user)
         .run();
+      // 出局后把份额并入「出局者权重池」（与 /burn/claim/personal/confirm 路径一致，幂等）。
+      const { enterOutWeightPool } = await import("./burn-realtime");
+      await enterOutWeightPool(env, user);
     }
   }
 

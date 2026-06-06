@@ -172,9 +172,9 @@ export default function HomePage() {
           )}
 
           <div className="flex gap-2">
-            <Link href="/stake" className="flex-1">
+            <Link href="/burn" className="flex-1">
               <Button className="w-full" size="md">
-                <Coins className="h-4 w-4" /> {t("home.action.stake")}
+                <Flame className="h-4 w-4" /> {t("home.action.burn")}
               </Button>
             </Link>
             <Link href="/ai" className="flex-1">
@@ -213,7 +213,7 @@ export default function HomePage() {
         <span className="text-xs uppercase tracking-widest text-white/40">{t("home.shortcuts")}</span>
       </div>
       <div className="grid grid-cols-3 gap-2">
-        <ShortcutCard href="/burn" icon={Flame} label={t("home.shortcut.burn")} color="#ef4444" />
+        <ShortcutCard href="/stake" icon={Coins} label={t("home.shortcut.stake")} color="#b829ff" />
         <ShortcutCard href="/me?tab=team" icon={Users} label={t("home.shortcut.team")} color="#00c6ff" />
         <ShortcutCard href="/me?tab=assets" icon={Wallet} label={t("home.shortcut.assets")} color="#b829ff" />
         <ShortcutCard href="/lottery" icon={Ticket} label={t("home.shortcut.lottery")} color="#f59e0b" />

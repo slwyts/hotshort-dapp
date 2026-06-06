@@ -82,6 +82,17 @@ export default function StakePage() {
             </Link>
           </CardContent>
         </Card>
+        <Card>
+          <CardContent className="flex items-center justify-between gap-3 py-4">
+            <div>
+              <div className="text-sm font-bold">质押燃烧分红（5%）</div>
+              <div className="mt-0.5 text-xs text-white/45">质押满 6 个月可享全网 5% 燃烧权重分红，在燃烧订单中领取</div>
+            </div>
+            <Link href="/me?tab=orders&type=burn">
+              <Button size="sm" variant="outline">领取分红</Button>
+            </Link>
+          </CardContent>
+        </Card>
       </div>
     </PageShell>
   );

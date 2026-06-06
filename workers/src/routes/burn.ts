@@ -11,7 +11,7 @@ import { markRewardRowsSigned, type RewardClaimRow } from "../lib/reward-claims"
 import { readTokenBalance } from "../lib/token-balance";
 import { verifyVaultBurn, verifyVaultClaim } from "../lib/vault-events";
 import { hsWeiToUsdtSnapshot } from "../lib/pricing";
-import { distributeBurnRealtime, computeWeightClaimable, settleWeightToRewardClaim } from "../lib/burn-realtime";
+import { distributeBurnRealtime, computeWeightClaimable, settleWeightToRewardClaim, enterOutWeightPool } from "../lib/burn-realtime";
 import {
   BURN_ALLOCATION_BPS,
   BURN_AIRDROP_MIN_USDT,
@@ -22,7 +22,6 @@ import {
 export const burn = new Hono<{ Bindings: Env }>();
 
 const ACTIVE_BURN_REWARD_KINDS = [
-  "burn-weight",
   "stake-burn-dividend",
   "ai-burn-airdrop",
   "lp-dividend-weight",
@@ -105,6 +104,8 @@ async function markPersonalBurnClaimed(env: Env, user: string, amount: bigint, c
   )
     .bind(amount.toString(), claimedAt, claimedAt, normalizedUser)
     .run();
+  // 出局后把份额并入「出局者权重池」，从此享受 20% 权重分红（含历史 carryover）。
+  await enterOutWeightPool(env, normalizedUser);
 }
 
 async function collectPendingBurnRewards(env: Env, user: string, out: boolean) {
@@ -189,7 +190,7 @@ burn.get("/me", async (c) => {
   const personalClaimed = await hasClaimedPersonalBurn(c.env, user);
   const personalCapUsdt = status.totalUsdt * 2n;
   const pending = await collectPendingBurnRewards(c.env, user, !!status.out);
-  // 权重分红已实时化为累加器，叠加当前可领的权重收益（活跃/出局用户都享有）。
+  // 权重分红只给出局者；computeWeightClaimable 对未出局用户返回 0。
   const weightLive = await computeWeightClaimable(c.env, user);
   const burnPendingUsdt = pending.burnPendingUsdt + weightLive;
   const weightRewardUsdt = pending.weightRewardUsdt + weightLive;

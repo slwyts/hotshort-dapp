@@ -265,6 +265,7 @@ CREATE TABLE IF NOT EXISTS burn_rounds (
 
 -- 个人燃烧状态
 -- weight_reward_debt / weight_pending_usdt: 权重分红 MasterChef 累加器的个人债务与已结算待领额。
+-- weight_joined_out: 是否已把份额并入「出局者权重池」（出局后才享受 20% 权重分红），保证幂等。
 CREATE TABLE IF NOT EXISTS burn_personal_status (
   user TEXT PRIMARY KEY,
   total_burned_hs TEXT NOT NULL DEFAULT '0',
@@ -272,6 +273,7 @@ CREATE TABLE IF NOT EXISTS burn_personal_status (
   total_personal_claimed_usdt TEXT NOT NULL DEFAULT '0',
   weight_reward_debt TEXT NOT NULL DEFAULT '0',
   weight_pending_usdt TEXT NOT NULL DEFAULT '0',
+  weight_joined_out INTEGER NOT NULL DEFAULT 0,
   out_at INTEGER,
   updated_at INTEGER NOT NULL
 );
@@ -378,7 +380,8 @@ INSERT OR IGNORE INTO admin_config (key, value, updated_by, updated_at) VALUES
   ('lottery_current_round', '1', 'init', strftime('%s','now')),
   ('burn_current_round', '1', 'init', strftime('%s','now')),
   ('burn_weight_acc_per_share', '0', 'init', strftime('%s','now')),
-  ('burn_weight_total_share', '0', 'init', strftime('%s','now')),
+  ('burn_weight_out_total_share', '0', 'init', strftime('%s','now')),
+  ('burn_weight_carryover_usdt', '0', 'init', strftime('%s','now')),
   ('burn_blackhole_total_usdt', '0', 'init', strftime('%s','now')),
   ('lp_dividend_threshold_usdt', '100', 'init', strftime('%s','now')),
   ('lp_dividend_last_at', '0', 'init', strftime('%s','now')),

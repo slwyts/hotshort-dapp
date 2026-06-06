@@ -29,6 +29,7 @@ import {
   AI_AIRDROP_MIN_HS_USDT,
   type AiTierKey,
   BPS_DENOMINATOR,
+  WTO_TRADE_FEE_BPS,
 } from "@/lib/constants/business-rules";
 
 export const ai = new Hono<{ Bindings: Env }>();
@@ -47,11 +48,14 @@ function quoteStockSale(stockWei: bigint, stockPriceUsdt: number, hsPriceUsdt: n
   const stockPriceWei = decimalToWei(stockPriceUsdt);
   const hsPriceWei = decimalToWei(hsPriceUsdt);
   if (stockWei <= 0n || stockPriceWei <= 0n || hsPriceWei <= 0n) {
-    return { usdtOut: 0n, hsOut: 0n };
+    return { usdtOut: 0n, hsOutGross: 0n, hsFee: 0n, hsOut: 0n };
   }
   const usdtOut = (stockWei * stockPriceWei) / WEI_SCALE;
-  const hsOut = (usdtOut * WEI_SCALE) / hsPriceWei;
-  return { usdtOut, hsOut };
+  const hsOutGross = (usdtOut * WEI_SCALE) / hsPriceWei;
+  // 卖出 3% 手续费：扣减到账 HS，手续费部分不签发（留存 Vault）。
+  const hsFee = (hsOutGross * BigInt(WTO_TRADE_FEE_BPS)) / BigInt(BPS_DENOMINATOR);
+  const hsOut = hsOutGross - hsFee;
+  return { usdtOut, hsOutGross, hsFee, hsOut };
 }
 
 function monthlyAirdropPeriod(now: number): { previousMonth: string; currentMonthStart: number } {
@@ -217,7 +221,10 @@ ai.post("/swap", async (c) => {
   // 用 1e18 精度把 number → bigint
   const SCALE = 10n ** 18n;
   const ratioScaled = BigInt(Math.floor((hsPrice / stockPrice) * 1e18));
-  const stockOut = (hsWei * ratioScaled) / SCALE;
+  const stockOutGross = (hsWei * ratioScaled) / SCALE;
+  // 买入 3% 手续费：扣减到账股票，手续费部分不发放（留存 Vault）。
+  const stockFee = (stockOutGross * BigInt(WTO_TRADE_FEE_BPS)) / BigInt(BPS_DENOMINATOR);
+  const stockOut = stockOutGross - stockFee;
 
   const id = ulid();
   const now = await nowSeconds(c.env);
@@ -231,7 +238,7 @@ ai.post("/swap", async (c) => {
 
   await addStock(c.env, user, stockOut, false);
 
-  return c.json({ id, stockOut: stockOut.toString(), stockLocked: "0", unlocksAt: null });
+  return c.json({ id, stockOut: stockOut.toString(), stockFee: stockFee.toString(), feeBps: WTO_TRADE_FEE_BPS, stockLocked: "0", unlocksAt: null });
 });
 
 /** GET /ai/sell/quote  查询可卖 WTO 与按当前行情估算的 HS 到账。 */
@@ -248,7 +255,7 @@ ai.get("/sell/quote", async (c) => {
     getStockPriceUsdt(c.env),
     getHsPriceUsdt(c.env),
   ]);
-  const { usdtOut, hsOut } = quoteStockSale(stockAmount ?? 0n, stockPriceUsdt, hsPriceUsdt);
+  const { usdtOut, hsFee, hsOut } = quoteStockSale(stockAmount ?? 0n, stockPriceUsdt, hsPriceUsdt);
 
   return c.json({
     holdings: {
@@ -261,6 +268,8 @@ ai.get("/sell/quote", async (c) => {
     hsPriceUsdt,
     usdtOut: usdtOut.toString(),
     hsOut: hsOut.toString(),
+    hsFee: hsFee.toString(),
+    feeBps: WTO_TRADE_FEE_BPS,
     enough: (stockAmount ?? 0n) <= holdings.available,
   });
 });
@@ -280,7 +289,7 @@ ai.post("/sell", async (c) => {
     getStockPriceUsdt(c.env),
     getHsPriceUsdt(c.env),
   ]);
-  const { usdtOut, hsOut } = quoteStockSale(stockAmount, stockPriceUsdt, hsPriceUsdt);
+  const { usdtOut, hsFee, hsOut } = quoteStockSale(stockAmount, stockPriceUsdt, hsPriceUsdt);
   if (hsOut <= 0n) return c.json({ error: "quote unavailable" }, 503);
 
   const remaining = await sellAvailableStock(c.env, user, stockAmount);
@@ -306,6 +315,8 @@ ai.post("/sell", async (c) => {
     stockIn: stockAmount.toString(),
     usdtOut: usdtOut.toString(),
     hsOut: hsOut.toString(),
+    hsFee: hsFee.toString(),
+    feeBps: WTO_TRADE_FEE_BPS,
     stockPriceUsdt,
     hsPriceUsdt,
     holdings: {
