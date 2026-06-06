@@ -347,6 +347,10 @@ admin.get("/funds", async (c) => {
     addSignaturePressure(pending, row);
   }
 
+  // 质押兑付压力（单独汇总，前端用可读标签展示）
+  const stakePressurePrincipal: Record<StakeAsset, bigint> = { USDT: 0n, HS: 0n, LP: 0n };
+  let stakePressureInterestHs = 0n;
+  let stakeDueCount = 0;
   const stakeRows = await c.env.DB.prepare(
     `SELECT id, asset, amount, entry_value_usdt, lock_months, monthly_rate_bps, claim_nonce
        FROM stake_orders
@@ -365,16 +369,15 @@ admin.get("/funds", async (c) => {
   for (const row of stakeRows.results ?? []) {
     if (row.claim_nonce && activeNonces.has(row.claim_nonce)) continue;
     const principal = BigInt(row.amount);
-    const principalToken = tokenForStakeAsset(c.env, row.asset);
-    addPressure(pending, principalToken, principal);
+    stakePressurePrincipal[row.asset] += principal;
 
     let entryValueUsdt = BigInt(row.entry_value_usdt ?? "0");
     if (entryValueUsdt <= 0n) entryValueUsdt = await stakeAssetWeiToUsdtWei(c.env, row.asset, principal);
     const interestUsdt =
       (entryValueUsdt * BigInt(row.monthly_rate_bps) * BigInt(row.lock_months)) /
       BigInt(BPS_DENOMINATOR);
-    const yieldHs = await usdtWeiToHsWei(c.env, interestUsdt);
-    addPressure(pending, c.env.HS_TOKEN.toLowerCase() as Address, yieldHs);
+    stakePressureInterestHs += await usdtWeiToHsWei(c.env, interestUsdt);
+    stakeDueCount++;
   }
 
   const hsToken = c.env.HS_TOKEN.toLowerCase() as Address;
@@ -413,7 +416,18 @@ admin.get("/funds", async (c) => {
     if (token) addPressure(pending, token, BigInt(row.reward_amount));
   }
 
-  return c.json({ pending: [...pending.entries()].map(([token, amount]) => ({ token, pending: amount.toString() })) });
+  return c.json({
+    pending: [...pending.entries()].map(([token, amount]) => ({ token, pending: amount.toString() })),
+    stakePressure: {
+      principal: {
+        USDT: stakePressurePrincipal.USDT.toString(),
+        HS: stakePressurePrincipal.HS.toString(),
+        LP: stakePressurePrincipal.LP.toString(),
+      },
+      interestHs: stakePressureInterestHs.toString(),
+      dueOrders: stakeDueCount,
+    },
+  });
 });
 
 admin.get("/agent-accounts", async (c) => {

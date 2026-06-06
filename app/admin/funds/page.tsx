@@ -15,6 +15,12 @@ import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
 import { useContracts } from "@/lib/runtime-config";
 import { formatNumber, shortenAddress } from "@/lib/utils";
 
+interface StakePressure {
+  principal: { USDT: string; HS: string; LP: string };
+  interestHs: string;
+  dueOrders: number;
+}
+
 interface PendingRow {
   token: string;
   pending: number | string;
@@ -25,6 +31,7 @@ export default function AdminFundsPage() {
   const { jwt, signIn } = useSiweJwt();
   const { writeContractAsync } = useWriteContract();
   const [pending, setPending] = useState<PendingRow[]>([]);
+  const [stakePressure, setStakePressure] = useState<StakePressure | null>(null);
 
   // LP 分红配置
   const [lpThreshold, setLpThreshold] = useState("100");
@@ -75,8 +82,9 @@ export default function AdminFundsPage() {
     const token = jwt ?? (await signIn());
     if (!token) return;
     try {
-      const r = await api.get<{ pending: PendingRow[] }>("/admin/funds", token);
+      const r = await api.get<{ pending: PendingRow[]; stakePressure: StakePressure }>("/admin/funds", token);
       setPending(r.pending ?? []);
+      setStakePressure(r.stakePressure ?? null);
     } catch { /* ignore */ }
   }, [jwt, signIn]);
 
@@ -387,16 +395,51 @@ export default function AdminFundsPage() {
           </Card>
         </div>
 
-        <Card className="mt-6">
+        {/* 质押兑付压力 */}
+        <Card className="mt-6 border-yellow-500/30">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-yellow-400" /> 待领取签名
+              <Coins className="h-5 w-5 text-yellow-400" /> 质押兑付压力
             </CardTitle>
-            <p className="text-xs text-white/40">已签发但用户尚未领取的金额汇总</p>
+            <p className="text-xs text-white/40">
+              已到期尚未提取的质押单汇总——到期后用户可赎回本金（按质押资产原路返还）并领取 HS 利息
+            </p>
+          </CardHeader>
+          <CardContent>
+            {(!stakePressure || stakePressure.dueOrders === 0) ? (
+              <div className="py-4 text-center text-sm text-white/40">暂无到期未领取的质押单</div>
+            ) : (
+              <div className="space-y-3 text-sm">
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <StakeAssetChip label="USDT 本金" value={stakePressure.principal.USDT} />
+                  <StakeAssetChip label="HS 本金" value={stakePressure.principal.HS} />
+                  <StakeAssetChip label="LP 本金" value={stakePressure.principal.LP} />
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-[#b829ff]/20 bg-[#b829ff]/5 px-3 py-2">
+                  <span className="text-white/60">待支付 HS 利息</span>
+                  <span className="font-bold text-[#b829ff] tabular-nums">
+                    {formatNumber(Number(BigInt(stakePressure.interestHs)) / 1e18, 2)} HS
+                  </span>
+                </div>
+                <div className="text-[11px] text-white/35">
+                  共 {stakePressure.dueOrders} 笔到期订单，本金按质押资产原路返还，利息以 HS 代币支付
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 其他待领：彩票 + 燃烧 + 推广等 */}
+        <Card className="mt-3">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-white/40" /> 其他待领取汇总
+            </CardTitle>
+            <p className="text-xs text-white/40">彩票奖金、燃烧前十、权重分红、推广奖励等已签发尚未领取的金额</p>
           </CardHeader>
           <CardContent>
             {pending.length === 0 ? (
-              <div className="py-6 text-center text-sm text-white/40">暂无待领取签名</div>
+              <div className="py-4 text-center text-sm text-white/40">暂无其他待领取</div>
             ) : (
               <table className="w-full text-sm">
                 <thead>
@@ -421,6 +464,17 @@ export default function AdminFundsPage() {
         </Card>
       </div>
     </AdminGuard>
+  );
+}
+
+function StakeAssetChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/40 p-2.5">
+      <div className="text-[10px] text-white/45">{label}</div>
+      <div className="mt-0.5 text-sm font-bold tabular-nums text-white">
+        {formatNumber(Number(BigInt(value)) / 1e18, 2)}
+      </div>
+    </div>
   );
 }
 
