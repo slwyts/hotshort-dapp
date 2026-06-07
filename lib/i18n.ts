@@ -363,7 +363,7 @@ const zh = {
   "burn.allocTitle": "燃烧后的奖励分配",
   "burn.allocDesc": "本周燃烧会先进入待结算池，每周一按比例结算",
   "burn.alloc.blackHole": "永久销毁",
-  "burn.alloc.weight": "燃烧者分红",
+  "burn.alloc.weight": "权重分红",
   "burn.alloc.promotion": "邀请奖励",
   "burn.alloc.stake": "质押奖池",
   "burn.alloc.aiStock": "股票分红",
