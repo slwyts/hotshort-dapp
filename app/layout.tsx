@@ -35,7 +35,7 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const workerUrl = process.env.NEXT_PUBLIC_WORKER_URL || "";
+  const workerUrl = process.env.WORKER_URL || process.env.NEXT_PUBLIC_WORKER_URL || "";
   const runtimeConfig = await fetchRuntimeConfig(workerUrl);
   const wagmiConfig = buildWagmiConfig(runtimeConfig);
   const hdrs = await headers();

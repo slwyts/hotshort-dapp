@@ -387,3 +387,18 @@ INSERT OR IGNORE INTO admin_config (key, value, updated_by, updated_at) VALUES
   ('lp_dividend_last_at', '0', 'init', strftime('%s','now')),
   ('lp_dividend_round', '0', 'init', strftime('%s','now')),
   ('pancake_lottery_address', '', 'init', strftime('%s','now'));
+
+-- 默认质押利率（与 lib/constants/business-rules.ts 的 STAKE_DEFAULT_RATES_BPS 保持一致）
+INSERT OR IGNORE INTO stake_rates (asset, lock_months, monthly_rate_bps, updated_at) VALUES
+  ('USDT', 1, 50, strftime('%s','now')),
+  ('USDT', 3, 200, strftime('%s','now')),
+  ('USDT', 6, 400, strftime('%s','now')),
+  ('USDT', 12, 800, strftime('%s','now')),
+  ('HS', 1, 50, strftime('%s','now')),
+  ('HS', 3, 200, strftime('%s','now')),
+  ('HS', 6, 400, strftime('%s','now')),
+  ('HS', 12, 800, strftime('%s','now')),
+  ('LP', 1, 100, strftime('%s','now')),
+  ('LP', 3, 300, strftime('%s','now')),
+  ('LP', 6, 1000, strftime('%s','now')),
+  ('LP', 12, 2400, strftime('%s','now'));
