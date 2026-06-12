@@ -342,6 +342,7 @@ export default function BurnPage() {
   const promotionActive = Boolean(me?.promotionActive || totalBurnUsdt >= BURN_PROMOTION_ACTIVATE_USDT);
   const airdropStatus = me?.airdrop?.status ?? "none";
   const canSubmitAirdrop = airdropStatus === "none" || airdropStatus === "rejected";
+  const hasOutWeightClaimable = burnPendingUsdt > 0 || burnPendingHs > 0;
 
   return (
     <PageShell>
@@ -408,14 +409,18 @@ export default function BurnPage() {
             </div>
           )}
 
-          {me && !me.out && !me.personalClaimed && (
-            <Button onClick={claimPersonal} disabled={personalClaimableUsdt <= 0} variant="outline" className="w-full border-[#ef4444]/40 text-red-100 hover:bg-[#ef4444]/10">
-              <Flame className="h-4 w-4" /> {personalClaimableUsdt > 0 ? t("burn.claimPersonal") : t("burn.claimPersonalPending")}
-            </Button>
-          )}
-          {me && me.out && (
-            <Button onClick={claimTop10} disabled={burnPendingUsdt <= 0 && burnPendingHs <= 0} variant="outline" className="w-full">
-              <Award className="h-4 w-4" /> {(burnPendingUsdt > 0 || burnPendingHs > 0) ? t("burn.claimWeekly") : t("burn.claimWeeklyPending")}
+          {me && (
+            <Button
+              onClick={me.out ? claimTop10 : claimPersonal}
+              disabled={me.out ? !hasOutWeightClaimable : me.personalClaimed || personalClaimableUsdt <= 0}
+              variant="outline"
+              className={cn("w-full", !me.out && "border-[#ef4444]/40 text-red-100 hover:bg-[#ef4444]/10")}
+            >
+              {me.out ? <Award className="h-4 w-4" /> : <Flame className="h-4 w-4" />}
+              {me.out
+                ? hasOutWeightClaimable ? t("burn.claimWeekly") : t("burn.claimWeeklyPending")
+                : me.personalClaimed ? t("burn.claimSyncing")
+                  : personalClaimableUsdt > 0 ? t("burn.claimPersonal") : t("burn.claimPersonalPending")}
             </Button>
           )}
         </CardContent>

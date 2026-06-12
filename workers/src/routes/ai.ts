@@ -442,7 +442,7 @@ ai.post("/dividend/claim", async (c) => {
   return c.json({ token: "STOCK", amount: totalStock.toString(), creditedAt: now, divs: divs.results?.length ?? 0, refs: refs.results?.length ?? 0, burnStockRewards: burnStockRewards.results?.length ?? 0 });
 });
 
-/** POST /ai/referral/claim  领取 AI 直推 USDT 奖励 */
+/** POST /ai/referral/claim  领取 USDT 团队返佣（AI 直推 + 燃烧邀请） */
 ai.post("/referral/claim", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);

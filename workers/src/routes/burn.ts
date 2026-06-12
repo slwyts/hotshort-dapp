@@ -128,14 +128,6 @@ async function collectPendingBurnRewards(env: Env, user: string, out: boolean) {
     .bind(normalizedUser, ...rewardKinds)
     .all<RewardClaimRow>()).results ?? [];
 
-  const referralRows = out
-    ? []
-    : (await env.DB.prepare(
-      "SELECT id, reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0 AND reward_token = 'USDT' AND kind IN ('burn-gen1', 'burn-gen2')",
-    )
-      .bind(normalizedUser)
-      .all<{ id: string; reward_amount: string }>()).results ?? [];
-
   let burnPendingUsdt = 0n;
   let burnPendingHs = 0n;
   let top10RewardUsdt = 0n;
@@ -143,7 +135,6 @@ async function collectPendingBurnRewards(env: Env, user: string, out: boolean) {
   let stakeRewardUsdt = 0n;
   let aiRewardHs = 0n;
   let lpDividendRewardUsdt = 0n;
-  let referralRewardUsdt = 0n;
 
   for (const row of top10Rows) {
     const amount = BigInt(row.reward_usdt);
@@ -159,16 +150,10 @@ async function collectPendingBurnRewards(env: Env, user: string, out: boolean) {
     else if (row.kind === "ai-burn-airdrop" && row.reward_token === "HS") aiRewardHs += amount;
     else if ((row.kind === "lp-dividend-weight" || row.kind === "lp-dividend-top10") && row.reward_token === "USDT") lpDividendRewardUsdt += amount;
   }
-  for (const row of referralRows) {
-    const amount = BigInt(row.reward_amount);
-    burnPendingUsdt += amount;
-    referralRewardUsdt += amount;
-  }
 
   return {
     top10Rows,
     rewardRows,
-    referralRows,
     burnPendingUsdt,
     burnPendingHs,
     top10RewardUsdt,
@@ -176,7 +161,6 @@ async function collectPendingBurnRewards(env: Env, user: string, out: boolean) {
     stakeRewardUsdt,
     aiRewardHs,
     lpDividendRewardUsdt,
-    referralRewardUsdt,
     personalEligibleUsdt: burnPendingUsdt,
   };
 }
@@ -220,7 +204,7 @@ burn.get("/me", async (c) => {
     pendingBreakdown: {
       top10Usdt: pending.top10RewardUsdt.toString(),
       weightUsdt: weightRewardUsdt.toString(),
-      promotionUsdt: pending.referralRewardUsdt.toString(),
+      promotionUsdt: "0",
       stakeUsdt: pending.stakeRewardUsdt.toString(),
       aiHs: pending.aiRewardHs.toString(),
       lpDividendUsdt: pending.lpDividendRewardUsdt.toString(),
@@ -365,7 +349,8 @@ burn.post("/record", async (c) => {
 });
 
 /**
- * POST /burn/claim/top10  签名领取燃烧模块可领资产：Top10、权重分红、推广奖励、质押分红。
+ * POST /burn/claim/top10  签名领取燃烧模块可领资产：Top10、权重分红、质押分红等。
+ * 燃烧邀请返佣归团队返佣入口领取，不占用个人燃烧出局额度。
  */
 burn.post("/claim/top10", async (c) => {
   const user = await requireUser(c);
@@ -393,7 +378,6 @@ burn.post("/claim/top10", async (c) => {
     const token = rewardTokenAddress(c.env, row.reward_token);
     if (token) addTokenTotal(totals, token, BigInt(row.reward_amount));
   }
-  for (const row of pending.referralRows) addTokenTotal(totals, usdtToken, BigInt(row.reward_amount));
 
   let total = 0n;
   for (const amount of totals.values()) total += amount;
@@ -402,7 +386,6 @@ burn.post("/claim/top10", async (c) => {
   const batchIds = [
     ...pending.top10Rows.map((row) => `top10:${row.id}`),
     ...pending.rewardRows.map((row) => `reward:${row.id}`),
-    ...pending.referralRows.map((row) => `ref:${row.id}`),
   ].sort();
   const nonce = deterministicNonce("burn-top10", `${user}:${batchIds.join("|")}`);
 
@@ -421,17 +404,12 @@ burn.post("/claim/top10", async (c) => {
       .run();
   }
   await markRewardRowsSigned(c.env, pending.rewardRows, nonceStr);
-  for (const row of pending.referralRows) {
-    await c.env.DB.prepare("UPDATE referral_rewards SET claim_nonce = ? WHERE id = ? AND claimed = 0")
-      .bind(nonceStr, row.id)
-      .run();
-  }
 
   return c.json({
     ...claim,
     top10Rows: pending.top10Rows.length,
     rewardRows: pending.rewardRows.length,
-    referralRows: pending.referralRows.length,
+    referralRows: 0,
   });
 });
 
@@ -477,11 +455,6 @@ burn.post("/claim/personal", async (c) => {
       .run();
   }
   await markRewardRowsSigned(c.env, pending.rewardRows.filter((row) => row.reward_token === "USDT"), claim.nonce);
-  for (const row of pending.referralRows) {
-    await c.env.DB.prepare("UPDATE referral_rewards SET claim_nonce = ? WHERE id = ? AND claimed = 0")
-      .bind(claim.nonce, row.id)
-      .run();
-  }
 
   return c.json({ ...claim, personalClaimedUsdt: amount.toString() });
 });

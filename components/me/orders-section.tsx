@@ -610,6 +610,7 @@ function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming
   const pendingHs = weiToNumber(me?.burnPendingHs);
   const personalClaimable = weiToNumber(me?.personalClaimableUsdt);
   const breakdown = me?.pendingBreakdown;
+  const hasOutWeightClaimable = pending > 0 || pendingHs > 0;
   return (
     <div className="space-y-3">
       <Card className={pending > 0 || pendingHs > 0 ? "border-[#b829ff]/40 bg-[#b829ff]/5" : undefined}>
@@ -631,12 +632,25 @@ function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming
               <Mini label="AI" value={breakdown.aiHs} unit="HS" />
             </div>
           )}
-          {me && !me.out && !me.personalClaimed && (
-            <Button onClick={claimPersonalBurn} disabled={claiming === "burn-personal" || personalClaimable <= 0} variant="outline" className="w-full">
-              {claiming === "burn-personal" ? <Loader2 className="h-4 w-4 animate-spin" /> : personalClaimable > 0 ? "领取分红并出局" : "暂无可领分红"}
+          {me && (
+            <Button
+              onClick={me.out ? claimBurn : claimPersonalBurn}
+              disabled={
+                me.out
+                  ? claiming === "burn" || !hasOutWeightClaimable
+                  : claiming === "burn-personal" || me.personalClaimed || personalClaimable <= 0
+              }
+              variant={me.out ? "default" : "outline"}
+              className="w-full"
+            >
+              {claiming === "burn" || claiming === "burn-personal"
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : me.out
+                  ? hasOutWeightClaimable ? "领取出局权重分红" : "暂无出局权重分红"
+                  : me.personalClaimed ? "出局状态同步中"
+                    : personalClaimable > 0 ? "领取分红并出局" : "暂无可领分红"}
             </Button>
           )}
-          {me?.out && <Button onClick={claimBurn} disabled={claiming === "burn" || (pending <= 0 && pendingHs <= 0)} className="w-full">{claiming === "burn" ? <Loader2 className="h-4 w-4 animate-spin" /> : (pending > 0 || pendingHs > 0) ? "领取权重分红" : "暂无权重分红"}</Button>}
         </CardContent>
       </Card>
       {records.length === 0 ? <EmptyState href="/burn" text="还没有燃烧记录" /> : records.map((record) => (

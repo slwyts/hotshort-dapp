@@ -244,7 +244,7 @@ export async function computeWeightClaimable(env: Env, user: string): Promise<bi
 /**
  * 写：用户首次出局时，把其累计燃烧份额并入「出局者份额池」并对齐债务。
  * 若此前 carryover 中累积了权重池（无出局者期间），且此用户是首个出局者，
- * 则把 carryover 一次性并入 acc，使其全额归首个出局者。
+ * 则把 carryover 一次性记入其待领权重，避免债务对齐时抵消掉。
  * 必须在设置 out_at 之后、settleWeightToRewardClaim 之前调用。
  */
 export async function enterOutWeightPool(env: Env, user: string): Promise<void> {
@@ -263,24 +263,32 @@ export async function enterOutWeightPool(env: Env, user: string): Promise<void> 
   let outTotalShare = await readConfigBig(env, KEY_OUT_TOTAL_SHARE);
   const carryover = await readConfigBig(env, KEY_CARRYOVER);
 
+  const previousOutTotalShare = outTotalShare;
+  let joinedPending = 0n;
+
   // 先把本人份额并入出局份额池。
   outTotalShare += share;
 
-  // 若有滚存池且本人是触发并入的出局者，把 carryover 一次性折进 acc。
+  // 若有滚存池且本人是首个出局者，把 carryover 直接给本人待领；
+  // 否则按累加器分给已在池中的出局者。
   if (carryover > 0n && outTotalShare > 0n) {
-    acc += (carryover * ACC_PRECISION) / outTotalShare;
+    if (previousOutTotalShare === 0n) {
+      joinedPending = carryover;
+    } else {
+      acc += (carryover * ACC_PRECISION) / previousOutTotalShare;
+    }
     await writeConfigBig(env, KEY_CARRYOVER, 0n, now);
   }
 
-  // 本人债务对齐当前 acc，从此刻起吃后续权重池（不追溯并入前的部分，carryover 已单独处理）。
+  // 本人债务对齐当前 acc，从此刻起吃后续权重池；首个出局者的历史 carryover 已放入 pending。
   const debt = (share * acc) / ACC_PRECISION;
 
   await writeConfigBig(env, KEY_ACC, acc, now);
   await writeConfigBig(env, KEY_OUT_TOTAL_SHARE, outTotalShare, now);
   await env.DB.prepare(
-    "UPDATE burn_personal_status SET weight_reward_debt = ?, weight_pending_usdt = '0', weight_joined_out = 1, updated_at = ? WHERE user = ?",
+    "UPDATE burn_personal_status SET weight_reward_debt = ?, weight_pending_usdt = ?, weight_joined_out = 1, updated_at = ? WHERE user = ?",
   )
-    .bind(debt.toString(), now, normalized)
+    .bind(debt.toString(), joinedPending.toString(), now, normalized)
     .run();
 }
 

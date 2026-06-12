@@ -107,7 +107,19 @@ type BurnMeResponse = {
   personalClaimed: boolean;
   out: boolean;
   burnPendingUsdt: string;
+  pendingBreakdown?: {
+    promotionUsdt: string;
+  };
   eligibleAirdrop: boolean;
+};
+
+type ReferralTreeResponse = {
+  rewardsPending: {
+    usdtWei: string;
+    stockWei: string;
+    hsWei: string;
+    count: number;
+  };
 };
 
 async function resetAndFund(accounts: TestAccount[]): Promise<Address> {
@@ -564,6 +576,10 @@ test.describe("README rule lifecycle scripts", () => {
     const alicePersonalClaimableUsdt = BigInt(aliceBurnStatus.personalClaimableUsdt);
     expect(alicePersonalClaimableUsdt).toBeGreaterThan(0n);
     expect(alicePersonalClaimableUsdt).toBeLessThanOrEqual(expectedAlicePersonalUsdt);
+    expect(BigInt(aliceBurnStatus.pendingBreakdown?.promotionUsdt ?? "0")).toBe(0n);
+    const aliceReferralBeforePersonal = await apiRequest<ReferralTreeResponse>("/referral/tree", { headers: bearer(aliceJwt) });
+    const aliceBurnInviteUsdt = BigInt(aliceReferralBeforePersonal.rewardsPending.usdtWei);
+    expect(aliceBurnInviteUsdt).toBeGreaterThan(0n);
 
     const aliceStockRewardClaim = await apiRequest<{
       token: string;
@@ -608,6 +624,9 @@ test.describe("README rule lifecycle scripts", () => {
     expect(BigInt(aliceAfterPersonalClaimAttempt.personalCapUsdt)).toBe(expectedAlicePersonalUsdt);
     expect(BigInt(aliceAfterPersonalClaimAttempt.personalClaimableUsdt)).toBe(0n);
     expect(BigInt(aliceAfterPersonalClaimAttempt.personalClaimedUsdt)).toBe(alicePersonalClaimableUsdt);
+    expect(BigInt(aliceAfterPersonalClaimAttempt.burnPendingUsdt)).toBeGreaterThan(0n);
+    const aliceReferralAfterPersonal = await apiRequest<ReferralTreeResponse>("/referral/tree", { headers: bearer(aliceJwt) });
+    expect(BigInt(aliceReferralAfterPersonal.rewardsPending.usdtWei)).toBe(aliceBurnInviteUsdt);
 
     const charlieActiveBurnClaim = await apiStatus("/burn/claim/top10", {
       method: "POST",
