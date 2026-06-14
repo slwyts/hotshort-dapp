@@ -10,6 +10,7 @@ import { readVaultOwner } from "../lib/vault-owner";
 import { ensureAgentTables, listAgentAlerts, listAgentUsers, normalizeAddress } from "../lib/agent-data";
 import { directReferralConfigKey } from "../lib/referral";
 import { importGenesisNode, normalizeAiTier } from "../lib/genesis-nodes";
+import { rebuildReferralPath } from "../lib/users";
 import { getTimeDebugInfo, realNowSeconds, setTimeOffset, todayBeijing, nowSeconds } from "../lib/time";
 import { distributeLpDividend } from "../lib/lp-dividend";
 import { stakeAssetWeiToUsdtWei, tokenForStakeAsset, usdtWeiToHsWei } from "../lib/pricing";
@@ -101,12 +102,42 @@ admin.post("/rates", async (c) => {
   return c.json({ updated });
 });
 
+/** GET /admin/genesis-nodes  当前创世节点名单 */
+admin.get("/genesis-nodes", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+
+  const limitParam = Number(c.req.query("limit") ?? 200);
+  const limit = Number.isInteger(limitParam) ? Math.min(Math.max(limitParam, 1), 500) : 200;
+  const rs = await c.env.DB.prepare(
+    `SELECT
+        g.address,
+        g.tier,
+        g.source,
+        g.imported_at,
+        g.imported_by,
+        u.referrer,
+        o.id AS order_id,
+        o.usdt_in,
+        o.stock_granted
+       FROM genesis_nodes g
+       LEFT JOIN users u ON u.address = g.address
+       LEFT JOIN ai_orders o ON o.source_tx_hash = 'genesis-import:' || g.address || ':' || g.tier
+      ORDER BY g.imported_at DESC, g.address ASC
+      LIMIT ?`,
+  )
+    .bind(limit)
+    .all();
+
+  return c.json({ items: rs.results ?? [] });
+});
+
 /** POST /admin/genesis-import  CSV 解析后批量入库 */
 admin.post("/genesis-import", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
   const body = (await c.req.json().catch(() => ({}))) as {
-    rows?: { address: string; tier: string }[];
+    rows?: { address: string; tier: string; referrer?: string | null }[];
   };
   if (!Array.isArray(body.rows)) return c.json({ error: "bad payload" }, 400);
 
@@ -114,22 +145,30 @@ admin.post("/genesis-import", async (c) => {
   let inserted = 0;
   let skipped = 0;
   let ordersCreated = 0;
+  let referrersBound = 0;
+  const touchedUsers = new Set<string>();
   for (const row of body.rows) {
     if (!/^0x[a-f0-9]{40}$/i.test(row.address)) continue;
     const tier = normalizeAiTier(row.tier);
     if (!tier) continue;
+    const referrer = (row.referrer ?? "").trim().toLowerCase();
+    if (referrer && !/^0x[a-f0-9]{40}$/.test(referrer)) continue;
     const res = await importGenesisNode(c.env, {
       address: row.address,
       tier,
       source: "csv",
       importedAt: now,
       importedBy: owner,
+      referrer: referrer || null,
     });
     if (res.inserted) inserted++;
     else skipped++;
     if (res.orderCreated) ordersCreated++;
+    if (res.referrerBound) referrersBound++;
+    touchedUsers.add(row.address.toLowerCase());
   }
-  return c.json({ inserted, skipped, ordersCreated });
+  for (const user of touchedUsers) await rebuildReferralPath(c.env, user);
+  return c.json({ inserted, skipped, ordersCreated, referrersBound });
 });
 
 /** POST /admin/genesis-scan  从 BscScan 扫描历史 USDT 入账 */

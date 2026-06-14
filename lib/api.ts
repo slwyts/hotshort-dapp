@@ -93,6 +93,7 @@ export const endpoints = {
   referralResolve: (code: string) => `/referral/resolve/${encodeURIComponent(code)}`,
   adminRates: "/admin/rates",
   adminLottery: "/admin/lottery-config",
+  adminGenesisNodes: "/admin/genesis-nodes",
   adminGenesisImport: "/admin/genesis-import",
   adminGenesisScan: "/admin/genesis-scan",
   adminAirdrop: "/admin/airdrop-list",
