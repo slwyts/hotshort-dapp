@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { AdminGuard } from "@/components/admin-guard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -33,7 +32,7 @@ export default function AdminHomePage() {
         <p className="mt-2 text-sm text-white/50">仅管理员钱包可访问</p>
         <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {sections.map((s) => (
-            <Link key={s.href} href={s.href}>
+            <a key={s.href} href={s.href}>
               <Card className="group h-full transition-all duration-200 hover:-translate-y-1 hover:border-[#b829ff]/40 hover:shadow-[0_0_20px_rgba(184,41,255,0.15)]">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-3">
@@ -47,7 +46,7 @@ export default function AdminHomePage() {
                   <p className="text-sm text-white/50">{s.desc}</p>
                 </CardContent>
               </Card>
-            </Link>
+            </a>
           ))}
         </div>
       </div>
