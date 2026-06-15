@@ -18,6 +18,7 @@ const InviteSection = dynamic(() => import("@/components/me/invite-section").the
 const DocsSection = dynamic(() => import("@/components/me/docs-section").then((m) => m.DocsSection), { ssr: false });
 const SettingsSection = dynamic(() => import("@/components/me/settings-section").then((m) => m.SettingsSection), { ssr: false });
 const AgentEntryCard = dynamic(() => import("@/components/me/agent-entry-card").then((m) => m.AgentEntryCard), { ssr: false });
+const AdminEntryCard = dynamic(() => import("@/components/me/admin-entry-card").then((m) => m.AdminEntryCard), { ssr: false });
 
 const TAB_KEYS = ["assets", "orders", "team", "invite", "docs", "settings"] as const;
 type TabKey = (typeof TAB_KEYS)[number];
@@ -84,7 +85,8 @@ function MeContent() {
         </CardContent>
       </Card>
 
-      <div className="mt-3">
+      <div className="mt-3 space-y-3">
+        <AdminEntryCard />
         <AgentEntryCard />
       </div>
 
