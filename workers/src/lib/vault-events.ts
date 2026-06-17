@@ -11,8 +11,28 @@ const CLAIMED_EVENT = parseAbiItem(
   "event Claimed(address indexed user, address indexed token, uint256 amount, uint8 indexed reason, uint256 nonce)",
 );
 
+const VAULT_NONCE_ABI = [
+  {
+    type: "function",
+    name: "usedNonces",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "uint256" }],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
 function sameAddress(a: string | undefined, b: string): boolean {
   return (a ?? "").toLowerCase() === b.toLowerCase();
+}
+
+export async function readVaultNonceUsed(env: Env, nonce: bigint): Promise<boolean> {
+  const client = createPublicClient({ transport: http(env.RPC_URL) });
+  return client.readContract({
+    address: env.VAULT_ADDRESS as Address,
+    abi: VAULT_NONCE_ABI,
+    functionName: "usedNonces",
+    args: [nonce],
+  });
 }
 
 async function receiptLogs(env: Env, txHash: Hex) {

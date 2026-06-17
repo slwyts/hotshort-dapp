@@ -123,7 +123,7 @@ export const AI_SWAP_LOCK_SECONDS = 0;
 export const WTO_TRADE_FEE_BPS = 300; // 3%
 
 // ===== §3 彩票（薄饼克隆） =====
-/** 周奖池补给（HS） */
+/** 每期奖池补给（HS），期次跟随 PancakeSwap LotteryV2 */
 export const LOTTERY_WEEKLY_REFILL_HS = 100_000;
 /** 门票价（USDT） — 后台可改 */
 export const LOTTERY_DEFAULT_TICKET_USDT = 1;

@@ -154,7 +154,7 @@ export default function AdminLotteryPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-white/70">每周奖池补给</label>
+                  <label className="text-sm font-medium text-white/70">每期奖池补给</label>
                   <div className="mt-1 flex items-center gap-2">
                     <Input
                       type="number"

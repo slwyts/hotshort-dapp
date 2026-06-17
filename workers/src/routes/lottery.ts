@@ -9,7 +9,9 @@ import { nowSeconds } from "../lib/time";
 import { createClaimSignature, getExistingSignature } from "../lib/claims";
 import { deterministicNonce } from "../lib/nonce";
 import { decimalToWei, usdtWeiToHsWei } from "../lib/pricing";
-import { verifyVaultDeposit, verifyVaultClaim } from "../lib/vault-events";
+import { readVaultNonceUsed, verifyVaultDeposit, verifyVaultClaim } from "../lib/vault-events";
+import { syncPancakeLotteryCycle } from "../lib/lottery-draw";
+import { getPancakeLotteryAddress, PANCAKE_LOTTERY_STATUS, readPancakeLottery } from "../lib/pancake-lottery";
 import { LOTTERY_TO_POOL_BPS, BPS_DENOMINATOR } from "@/lib/constants/business-rules";
 
 export const lottery = new Hono<{ Bindings: Env }>();
@@ -28,14 +30,28 @@ async function getTicketPriceUsdt(env: Env): Promise<number> {
   return Number(row?.value ?? 1);
 }
 
-async function getOrCreateRound(env: Env): Promise<{ roundNo: number; pool_hs: string; ticket_price_hs: string }> {
+async function getOrCreateRound(env: Env): Promise<{
+  roundNo: number;
+  pool_hs: string;
+  ticket_price_hs: string;
+  opened_at: number;
+  pancake_lottery_id: string | null;
+}> {
   const roundNo = await getCurrentRound(env);
   const row = await env.DB.prepare(
-    "SELECT round_no, pool_hs, ticket_price_hs FROM lottery_rounds WHERE round_no = ?",
+    "SELECT round_no, pool_hs, ticket_price_hs, opened_at, pancake_lottery_id FROM lottery_rounds WHERE round_no = ?",
   )
     .bind(roundNo)
-    .first<{ round_no: number; pool_hs: string; ticket_price_hs: string }>();
-  if (row) return { roundNo: row.round_no, pool_hs: row.pool_hs, ticket_price_hs: row.ticket_price_hs };
+    .first<{ round_no: number; pool_hs: string; ticket_price_hs: string; opened_at: number; pancake_lottery_id: string | null }>();
+  if (row) {
+    return {
+      roundNo: row.round_no,
+      pool_hs: row.pool_hs,
+      ticket_price_hs: row.ticket_price_hs,
+      opened_at: row.opened_at,
+      pancake_lottery_id: row.pancake_lottery_id,
+    };
+  }
 
   const refill = await env.DB.prepare(
     "SELECT value FROM admin_config WHERE key = 'lottery_weekly_refill_hs'",
@@ -44,17 +60,34 @@ async function getOrCreateRound(env: Env): Promise<{ roundNo: number; pool_hs: s
 
   const ticketUsdt = await getTicketPriceUsdt(env);
   const ticketHsWei = await usdtWeiToHsWei(env, decimalToWei(ticketUsdt));
+  const now = await nowSeconds(env);
 
   await env.DB.prepare(
     "INSERT INTO lottery_rounds (round_no, ticket_price_hs, pool_hs, opened_at) VALUES (?, ?, ?, ?)",
   )
-    .bind(roundNo, ticketHsWei.toString(), refillHsWei.toString(), await nowSeconds(env))
+    .bind(roundNo, ticketHsWei.toString(), refillHsWei.toString(), now)
     .run();
-  return { roundNo, pool_hs: refillHsWei.toString(), ticket_price_hs: ticketHsWei.toString() };
+  return { roundNo, pool_hs: refillHsWei.toString(), ticket_price_hs: ticketHsWei.toString(), opened_at: now, pancake_lottery_id: null };
+}
+
+async function ensurePancakeRoundOpen(env: Env, round: { pancake_lottery_id: string | null }): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  const address = await getPancakeLotteryAddress(env);
+  if (!address) return { ok: true };
+  if (!round.pancake_lottery_id || !/^\d+$/.test(round.pancake_lottery_id)) {
+    return { ok: false, error: "pancake lottery round unavailable", status: 503 };
+  }
+  const pancake = await readPancakeLottery(env, Number(round.pancake_lottery_id));
+  if (!pancake) return { ok: false, error: "pancake lottery round unavailable", status: 503 };
+  const now = await nowSeconds(env);
+  if (pancake.status !== PANCAKE_LOTTERY_STATUS.open || (pancake.endTime > 0 && now >= pancake.endTime)) {
+    return { ok: false, error: "lottery round closed", status: 400 };
+  }
+  return { ok: true };
 }
 
 /** GET /lottery/round  当前期 + 我的门票（未开奖 + 已开奖） */
 lottery.get("/round", async (c) => {
+  await syncPancakeLotteryCycle(c.env).catch(() => null);
   const r = await getOrCreateRound(c.env);
   const user = await requireUser(c);
 
@@ -79,7 +112,13 @@ lottery.get("/round", async (c) => {
   }
 
   return c.json({
-    current: { roundNo: r.roundNo, poolHs: r.pool_hs, ticketPriceHs: r.ticket_price_hs },
+    current: {
+      roundNo: r.roundNo,
+      poolHs: r.pool_hs,
+      ticketPriceHs: r.ticket_price_hs,
+      openedAt: r.opened_at,
+      pancakeLotteryId: r.pancake_lottery_id,
+    },
     history: hist.results ?? [],
     myTickets,
   });
@@ -112,7 +151,10 @@ lottery.post("/buy", async (c) => {
   if (entries.some((n) => !/^\d{6}$/.test(n))) return c.json({ error: "bad numbers (6 digits)" }, 400);
 
   await upsertUser(c.env, user);
+  await syncPancakeLotteryCycle(c.env).catch(() => null);
   const round = await getOrCreateRound(c.env);
+  const open = await ensurePancakeRoundOpen(c.env, round);
+  if (!open.ok) return c.json({ error: open.error }, open.status as 400 | 503);
   const now = await nowSeconds(c.env);
 
   // 累计 paid_hs = ticketPriceHs * entries.length
@@ -185,7 +227,17 @@ lottery.post("/claim", async (c) => {
 
   // 已有有效签名 → 直接返回
   const existing = await getExistingSignature(c.env, nonce, now);
-  if (existing) return c.json(existing);
+  if (existing) {
+    const nonceUsed = await readVaultNonceUsed(c.env, nonce).catch(() => false);
+    if (nonceUsed) {
+      await c.env.DB.batch([
+        c.env.DB.prepare("UPDATE claim_signatures SET used_at = ? WHERE nonce = ? AND used_at IS NULL").bind(now, nonce.toString()),
+        c.env.DB.prepare("UPDATE lottery_tickets SET claimed = 1 WHERE id = ?").bind(ticket.id),
+      ]);
+      return c.json({ error: "already claimed" }, 400);
+    }
+    return c.json(existing);
+  }
 
   const reason = 3; // LOTTERY_PRIZE
   const amount = BigInt(ticket.prize_hs);

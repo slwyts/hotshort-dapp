@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useAccount, useWriteContract } from "wagmi";
+import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import { formatUnits, keccak256, toHex } from "viem";
 import { Loader2, Ticket as TicketIcon, Trophy, Dice5, Plus, Trash2 } from "lucide-react";
 import Swal from "sweetalert2";
@@ -53,6 +53,7 @@ export default function LotteryPage() {
   const { address, isConnected } = useAccount();
   const { jwt, signIn } = useSiweJwt();
   const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
   const { t } = useLocale();
   const { vault, hsToken } = useContracts();
   const { ensureBound } = useReferralGate();
@@ -163,6 +164,7 @@ export default function LotteryPage() {
         signature: string;
       }>(endpoints.lotteryClaim, { ticketId }, token);
       Swal.fire({ title: t("lot.claim.confirm"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
+      if (!publicClient) throw new Error(t("common.rpcUnavailable"));
       const txHash = await writeContractAsync({
         address: vault,
         abi: VAULT_ABI,
@@ -177,6 +179,10 @@ export default function LotteryPage() {
           sig.signature as `0x${string}`,
         ],
       });
+      Swal.fire({ title: t("common.waitingOnChain"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+      if (receipt.status !== "success") throw new Error(t("common.txFailedOnChain"));
+      await api.post(endpoints.lotteryConfirm, { ticketId, txHash }, token).catch((e: unknown) => console.error("lottery confirm failed", e));
       await Swal.fire({
         icon: "success",
         title: t("lot.claim.success.title"),

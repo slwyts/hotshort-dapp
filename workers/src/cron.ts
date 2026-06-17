@@ -3,7 +3,7 @@ import { syncVaultEvents } from "./lib/indexer";
 import { settleAiDividend } from "./lib/dividend";
 import { releaseDueAiStock } from "./lib/ai-releases";
 import { syncStockQuote } from "./lib/stocks";
-import { drawLottery } from "./lib/lottery-draw";
+import { syncPancakeLotteryCycle } from "./lib/lottery-draw";
 import { settleBurnRound } from "./lib/burn-settle";
 import { distributeLpDividend } from "./lib/lp-dividend";
 import { distributeBurnRealtime } from "./lib/burn-realtime";
@@ -15,10 +15,10 @@ import { nowSeconds } from "./lib/time";
  * 不再依赖 CF 多条 cron 表达式与字符串匹配。
  *
  * 任务节奏：
- *   - 每分钟：Vault 事件索引 + LP 分红检查
+ *   - 每分钟：Vault 事件索引 + LP 分红检查 + Pancake 彩票周期同步
  *   - 每 15 分钟：WTO 股价同步
  *   - 每日 UTC 00:00（北京 08:00）：AI 股票释放 + 股票分红结算
- *   - 每周日 UTC 16:00（北京周一 00:00）：彩票开奖 + 燃烧周榜结算
+ *   - 每周日 UTC 16:00（北京周一 00:00）：燃烧周榜结算
  */
 
 /** 读取某任务上次执行的 bucket 标记 */
@@ -106,6 +106,14 @@ export async function runCron(_event: ScheduledEvent, env: Env): Promise<void> {
     console.error(`[cron] lp-dividend error`, (e as Error).message);
   }
 
+  // 每分钟：对齐 PancakeSwap 彩票周期；到达 Pancake 开奖状态后立即结算当前 Hotshort 彩票期。
+  try {
+    const lot = await syncPancakeLotteryCycle(env);
+    if (!lot.skipped && !lot.pending) console.log(`[cron] lottery-sync`, lot);
+  } catch (e) {
+    console.error(`[cron] lottery-sync error`, (e as Error).message);
+  }
+
   // 每 15 分钟：股价同步
   if (await isDue(env, "cron_last_stock", quarterBucket(now), now)) {
     try {
@@ -128,11 +136,9 @@ export async function runCron(_event: ScheduledEvent, env: Env): Promise<void> {
     }
   }
 
-  // 每周日 UTC 16:00：彩票开奖 + 燃烧周榜结算
+  // 每周日 UTC 16:00：燃烧周榜结算
   if (await isDue(env, "cron_last_weekly", weeklyBucket(date), now)) {
     try {
-      const lot = await drawLottery(env);
-      console.log(`[cron] lottery`, lot);
       const burn = await settleBurnRound(env);
       console.log(`[cron] burn-settle`, burn);
     } catch (e) {
