@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, type ReactNode } from "react";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import { formatUnits, parseUnits } from "viem";
 import { Loader2, Flame, Trophy, Send, Award } from "lucide-react";
@@ -99,6 +99,13 @@ function formatClaimAssetSummary(amounts: string[], tokens: string[], contracts:
   return parts.length > 0 ? parts.join(" + ") : "0 USDT";
 }
 
+function formatRewardPreview(usdt: number, hs = 0): string {
+  const parts: string[] = [];
+  if (usdt > 0 || hs <= 0) parts.push(`${formatNumber(usdt, 2)} USDT`);
+  if (hs > 0) parts.push(`${formatNumber(hs, 2)} HS`);
+  return parts.join(" + ");
+}
+
 export default function BurnPage() {
   const { address, isConnected } = useAccount();
   const { jwt, signIn } = useSiweJwt();
@@ -115,6 +122,7 @@ export default function BurnPage() {
   const [loading, setLoading] = useState(false);
   const [hsAmount, setHsAmount] = useState("100");
   const [submitting, setSubmitting] = useState(false);
+  const [claimingReward, setClaimingReward] = useState<"personal" | "weight" | null>(null);
   const [hotshortAccount, setHotshortAccount] = useState("");
   const [submittingAirdrop, setSubmittingAirdrop] = useState(false);
 
@@ -204,6 +212,7 @@ export default function BurnPage() {
   const claimTop10 = async () => {
     const token = jwt ?? (await signIn());
     if (!token) return;
+    setClaimingReward("weight");
     try {
       Swal.fire({ title: t("burn.claim.preparing"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const sig = await api.post<{
@@ -251,12 +260,15 @@ export default function BurnPage() {
       await refresh();
     } catch (e) {
       await Swal.fire({ icon: "error", title: t("error.title"), text: (e as Error).message, background: "#141419", color: "#fff" });
+    } finally {
+      setClaimingReward(null);
     }
   };
 
   const claimPersonal = async () => {
     const token = jwt ?? (await signIn());
     if (!token) return;
+    setClaimingReward("personal");
     try {
       Swal.fire({ title: t("burn.personalClaim.preparing"), background: "#141419", color: "#fff", didOpen: () => Swal.showLoading() });
       const sig = await api.post<{
@@ -303,6 +315,8 @@ export default function BurnPage() {
       await refresh();
     } catch (e) {
       await Swal.fire({ icon: "error", title: t("error.title"), text: (e as Error).message, background: "#141419", color: "#fff" });
+    } finally {
+      setClaimingReward(null);
     }
   };
 
@@ -342,7 +356,10 @@ export default function BurnPage() {
   const promotionActive = Boolean(me?.promotionActive || totalBurnUsdt >= BURN_PROMOTION_ACTIVATE_USDT);
   const airdropStatus = me?.airdrop?.status ?? "none";
   const canSubmitAirdrop = airdropStatus === "none" || airdropStatus === "rejected";
+  const isOut = Boolean(me?.out || me?.personalClaimed);
   const hasOutWeightClaimable = burnPendingUsdt > 0 || burnPendingHs > 0;
+  const canClaimPersonal = Boolean(me && !isOut && personalClaimableUsdt > 0);
+  const canClaimOutWeight = Boolean(me && isOut && hasOutWeightClaimable);
 
   return (
     <PageShell>
@@ -383,9 +400,7 @@ export default function BurnPage() {
             <div className="grid grid-cols-2 gap-1.5 text-center">
               <Stat label={t("burn.stat.total")} value={formatNumber(totalBurn, 0)} unit="HS" />
               <Stat label={t("burn.stat.totalValue")} value={formatNumber(totalBurnUsdt, 2)} unit="USDT" />
-              {!me.out && !me.personalClaimed
-                ? <Stat label={t("burn.stat.personalClaimable")} value={formatNumber(personalClaimableUsdt, 2)} unit="USDT" accent />
-                : <Stat label={t("burn.stat.weeklyClaimable")} value={formatNumber(burnPendingUsdt, 2)} unit="USDT" accent />}
+              <Stat label={t("burn.stat.personalClaimable")} value={formatNumber(personalClaimableUsdt, 2)} unit="USDT" accent={!isOut} />
               <Stat label={t("burn.stat.personalCap")} value={formatNumber(weiToNumber(me.personalCapUsdt), 2)} unit="USDT" />
             </div>
           )}
@@ -410,18 +425,48 @@ export default function BurnPage() {
           )}
 
           {me && (
-            <Button
-              onClick={me.out ? claimTop10 : claimPersonal}
-              disabled={me.out ? !hasOutWeightClaimable : me.personalClaimed || personalClaimableUsdt <= 0}
-              variant="outline"
-              className={cn("w-full", !me.out && "border-[#ef4444]/40 text-red-100 hover:bg-[#ef4444]/10")}
-            >
-              {me.out ? <Award className="h-4 w-4" /> : <Flame className="h-4 w-4" />}
-              {me.out
-                ? hasOutWeightClaimable ? t("burn.claimWeekly") : t("burn.claimWeeklyPending")
-                : me.personalClaimed ? t("burn.claimSyncing")
-                  : personalClaimableUsdt > 0 ? t("burn.claimPersonal") : t("burn.claimPersonalPending")}
-            </Button>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <ClaimPreview
+                  icon={<Flame className="h-3.5 w-3.5 text-[#ef4444]" />}
+                  label={t("burn.claimPanel.personal")}
+                  value={isOut ? t("burn.claimPanel.exited") : formatRewardPreview(personalClaimableUsdt)}
+                  hint={t("burn.claimPanel.personalHint")}
+                  active={!isOut && personalClaimableUsdt > 0}
+                />
+                <ClaimPreview
+                  icon={<Award className="h-3.5 w-3.5 text-[#b829ff]" />}
+                  label={t("burn.claimPanel.weight")}
+                  value={isOut ? formatRewardPreview(burnPendingUsdt, burnPendingHs) : t("burn.claimPanel.afterExit")}
+                  hint={t("burn.claimPanel.weightHint")}
+                  active={canClaimOutWeight}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  onClick={claimPersonal}
+                  disabled={!canClaimPersonal || claimingReward !== null}
+                  variant="outline"
+                  className="min-w-0 border-[#ef4444]/40 px-2 text-xs text-red-100 hover:bg-[#ef4444]/10"
+                >
+                  {claimingReward === "personal" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Flame className="h-4 w-4 shrink-0" />}
+                  <span className="min-w-0 truncate">
+                    {isOut ? t("burn.claimPersonalDone") : personalClaimableUsdt > 0 ? t("burn.claimPersonal") : t("burn.claimPersonalPending")}
+                  </span>
+                </Button>
+                <Button
+                  onClick={claimTop10}
+                  disabled={!canClaimOutWeight || claimingReward !== null}
+                  variant="outline"
+                  className="min-w-0 px-2 text-xs"
+                >
+                  {claimingReward === "weight" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Award className="h-4 w-4 shrink-0" />}
+                  <span className="min-w-0 truncate">
+                    {!isOut ? t("burn.claimWeightLocked") : hasOutWeightClaimable ? t("burn.claimWeekly") : t("burn.claimWeeklyPending")}
+                  </span>
+                </Button>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -557,6 +602,25 @@ function Stat({ label, value, unit, accent, subtle }: { label: string; value: st
       <div className={cn("mt-1 text-base font-bold", accent ? "text-[#b829ff]" : subtle ? "text-white/60" : "text-white")}>
         {value} <span className="text-xs text-white/40">{unit}</span>
       </div>
+    </div>
+  );
+}
+
+function ClaimPreview({ icon, label, value, hint, active }: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  hint: string;
+  active?: boolean;
+}) {
+  return (
+    <div className={cn("rounded-md border bg-black/30 p-2", active ? "border-[#b829ff]/30 bg-[#b829ff]/5" : "border-white/5")}>
+      <div className="flex items-center gap-1.5 text-[10px] text-white/45">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div className={cn("mt-1 truncate text-sm font-black tabular-nums", active ? "text-[#b829ff]" : "text-white/75")}>{value}</div>
+      <div className="mt-0.5 truncate text-[10px] text-white/35">{hint}</div>
     </div>
   );
 }

@@ -156,6 +156,13 @@ function formatClaimAssetSummary(amounts: string[], tokens: string[], contracts:
   return parts.length > 0 ? parts.join(" + ") : "0 USDT";
 }
 
+function formatRewardPreview(usdt: number, hs = 0): string {
+  const parts: string[] = [];
+  if (usdt > 0 || hs <= 0) parts.push(`${formatNumber(usdt, 2)} USDT`);
+  if (hs > 0) parts.push(`${formatNumber(hs, 2)} HS`);
+  return parts.join(" + ");
+}
+
 function dateText(seconds: number | null | undefined): string {
   if (!seconds) return "—";
   return new Date(seconds * 1000).toLocaleDateString("zh-CN");
@@ -610,7 +617,10 @@ function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming
   const pendingHs = weiToNumber(me?.burnPendingHs);
   const personalClaimable = weiToNumber(me?.personalClaimableUsdt);
   const breakdown = me?.pendingBreakdown;
+  const isOut = Boolean(me?.out || me?.personalClaimed);
   const hasOutWeightClaimable = pending > 0 || pendingHs > 0;
+  const canClaimPersonalBurn = Boolean(me && !isOut && personalClaimable > 0);
+  const canClaimOutWeight = Boolean(me && isOut && hasOutWeightClaimable);
   return (
     <div className="space-y-3">
       <Card className={pending > 0 || pendingHs > 0 ? "border-[#b829ff]/40 bg-[#b829ff]/5" : undefined}>
@@ -618,8 +628,8 @@ function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming
           <div className="grid grid-cols-2 gap-2">
             <DetailRow label="累计燃烧" value={`${formatNumber(weiToNumber(me?.totalBurnedHs), 2)} HS`} />
             <DetailRow label="燃烧价值" value={`${formatNumber(weiToNumber(me?.totalBurnedUsdt), 2)} USDT`} />
-            <DetailRow label="当前可领" value={me?.out || me?.personalClaimed ? "已出局，权重分红" : `${formatNumber(personalClaimable, 2)} USDT`} />
-            <DetailRow label="权重分红" value={`${formatNumber(pending, 2)} USDT`} />
+            <DetailRow label="燃烧分红" value={isOut ? "已出局" : `${formatNumber(personalClaimable, 2)} USDT`} />
+            <DetailRow label="出局权重" value={isOut ? formatRewardPreview(pending, pendingHs) : "出局后开启"} />
             <DetailRow label="本周总燃烧" value={`${formatNumber(weiToNumber(round?.current.totalBurnHs), 2)} HS`} />
             <DetailRow label="Top10 周池" value={`${formatNumber(weiToNumber(round?.current.top10PoolUsdt), 2)} USDT`} />
           </div>
@@ -633,23 +643,26 @@ function BurnOrders({ me, round, records, claimBurn, claimPersonalBurn, claiming
             </div>
           )}
           {me && (
-            <Button
-              onClick={me.out ? claimBurn : claimPersonalBurn}
-              disabled={
-                me.out
-                  ? claiming === "burn" || !hasOutWeightClaimable
-                  : claiming === "burn-personal" || me.personalClaimed || personalClaimable <= 0
-              }
-              variant={me.out ? "default" : "outline"}
-              className="w-full"
-            >
-              {claiming === "burn" || claiming === "burn-personal"
-                ? <Loader2 className="h-4 w-4 animate-spin" />
-                : me.out
-                  ? hasOutWeightClaimable ? "领取出局权重分红" : "暂无出局权重分红"
-                  : me.personalClaimed ? "出局状态同步中"
-                    : personalClaimable > 0 ? "领取分红并出局" : "暂无可领分红"}
-            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                onClick={claimPersonalBurn}
+                disabled={!canClaimPersonalBurn || claiming !== null}
+                variant="outline"
+                className="min-w-0 border-[#ef4444]/40 px-2 text-xs text-red-100 hover:bg-[#ef4444]/10"
+              >
+                {claiming === "burn-personal" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Flame className="h-4 w-4 shrink-0" />}
+                <span className="min-w-0 truncate">{isOut ? "已出局" : personalClaimable > 0 ? "领取燃烧分红" : "暂无燃烧分红"}</span>
+              </Button>
+              <Button
+                onClick={claimBurn}
+                disabled={!canClaimOutWeight || claiming !== null}
+                variant="outline"
+                className="min-w-0 px-2 text-xs"
+              >
+                {claiming === "burn" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Award className="h-4 w-4 shrink-0" />}
+                <span className="min-w-0 truncate">{!isOut ? "出局后可领" : hasOutWeightClaimable ? "领取出局权重" : "暂无出局权重"}</span>
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>
