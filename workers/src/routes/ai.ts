@@ -13,7 +13,7 @@ import {
   sellAvailableStock,
   bigintWei,
 } from "../lib/stocks";
-import { isStockTradePaused } from "../lib/stock-trade";
+import { getStockMarketStatus } from "../lib/stock-trade";
 import { ulid } from "../lib/ulid";
 import { nowSeconds, todayBeijing } from "../lib/time";
 import { createClaimSignature, getExistingSignature } from "../lib/claims";
@@ -190,7 +190,8 @@ ai.post("/buy", async (c) => {
 ai.post("/swap", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
-  if (await isStockTradePaused(c.env)) return c.json({ error: "stock trade paused" }, 403);
+  const market = await getStockMarketStatus(c.env);
+  if (market.closed) return c.json({ error: "stock trade paused", marketClosedReason: market.reason }, 403);
   const body = (await c.req.json().catch(() => ({}))) as {
     sourceTxHash?: string;
     hsAmountWei?: string;
@@ -257,7 +258,7 @@ ai.get("/sell/quote", async (c) => {
     getStockPriceUsdt(c.env),
     getHsPriceUsdt(c.env),
   ]);
-  const tradePaused = await isStockTradePaused(c.env);
+  const market = await getStockMarketStatus(c.env);
   const { usdtOut, hsFee, hsOut } = quoteStockSale(stockAmount ?? 0n, stockPriceUsdt, hsPriceUsdt);
 
   return c.json({
@@ -274,7 +275,13 @@ ai.get("/sell/quote", async (c) => {
     hsFee: hsFee.toString(),
     feeBps: WTO_TRADE_FEE_BPS,
     enough: (stockAmount ?? 0n) <= holdings.available,
-    tradePaused,
+    tradePaused: market.closed,
+    marketClosed: market.closed,
+    marketMode: market.mode,
+    manualClosed: market.manualClosed,
+    autoClosed: market.autoClosed,
+    marketClosedReason: market.reason,
+    market,
   });
 });
 
@@ -282,7 +289,8 @@ ai.get("/sell/quote", async (c) => {
 ai.post("/sell", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
-  if (await isStockTradePaused(c.env)) return c.json({ error: "stock trade paused" }, 403);
+  const market = await getStockMarketStatus(c.env);
+  if (market.closed) return c.json({ error: "stock trade paused", marketClosedReason: market.reason }, 403);
   const body = (await c.req.json().catch(() => ({}))) as { stockAmountWei?: string };
   const stockAmount = parsePositiveWei(body.stockAmountWei);
   if (stockAmount === null) return c.json({ error: "bad stockAmountWei" }, 400);
@@ -347,6 +355,7 @@ ai.get("/dividend/today", async (c) => {
     .first<{ date: string; stock_share: string; claimed: number }>();
   const h = await getHoldings(c.env, user);
   const stock = await getStockQuote(c.env);
+  const market = await getStockMarketStatus(c.env);
   const firstStockAt = await firstStockAcquiredAt(c.env, user);
   const now = await nowSeconds(c.env);
   const { previousMonth, currentMonthStart } = monthlyAirdropPeriod(now);
@@ -377,6 +386,12 @@ ai.get("/dividend/today", async (c) => {
   return c.json({
     today,
     stock,
+    marketClosed: market.closed,
+    marketMode: market.mode,
+    manualClosed: market.manualClosed,
+    autoClosed: market.autoClosed,
+    marketClosedReason: market.reason,
+    market,
     holdings: { totalStock: h.total.toString(), lockedStock: h.locked.toString() },
     dividend: div ?? { date: today, stock_share: "0", claimed: 0 },
     claimable: {

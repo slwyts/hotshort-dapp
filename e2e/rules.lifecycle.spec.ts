@@ -471,6 +471,48 @@ test.describe("README rule lifecycle scripts", () => {
     expect(BigInt(afterSwapHoldings.lockedStock) - BigInt(beforeSwapHoldings.lockedStock)).toBe(0n);
   });
 
+  test("stock market calendar closes swaps and daily dividend settlement", async () => {
+    await resetAndFund([ALICE, DEPLOYER]);
+    const adminJwt = await signIn(DEPLOYER);
+    const aliceJwt = await signIn(ALICE);
+
+    await apiRequest("/__test/time/set", {
+      method: "POST",
+      body: JSON.stringify({ nowSeconds: Math.floor(Date.UTC(2026, 5, 27, 1, 0, 0) / 1000) }),
+    });
+    await apiRequest("/admin/stock-trade", {
+      method: "POST",
+      headers: bearer(adminJwt),
+      body: JSON.stringify({ mode: "auto" }),
+    });
+
+    const weekendQuote = await apiRequest<{ tradePaused: boolean; marketClosed: boolean; marketClosedReason: string }>("/oracle/stock-price");
+    expect(weekendQuote).toMatchObject({ tradePaused: true, marketClosed: true, marketClosedReason: "weekend" });
+
+    const blockedSwap = await apiStatus("/ai/swap", {
+      method: "POST",
+      headers: bearer(aliceJwt),
+      body: JSON.stringify({}),
+    });
+    expect(blockedSwap.status).toBe(403);
+    expect(blockedSwap.body).toMatchObject({ error: "stock trade paused", marketClosedReason: "weekend" });
+
+    const skippedDividend = await runTestCron<null>("ai-dividend");
+    expect(skippedDividend.result).toBeNull();
+
+    await apiRequest("/admin/stock-trade", {
+      method: "POST",
+      headers: bearer(adminJwt),
+      body: JSON.stringify({ mode: "manual", manualClosed: false }),
+    });
+    const manualOpenQuote = await apiRequest<{ tradePaused: boolean; marketClosed: boolean; marketMode: string }>("/oracle/stock-price");
+    expect(manualOpenQuote).toMatchObject({ tradePaused: false, marketClosed: false, marketMode: "manual" });
+
+    const openDividend = await runTestCron<{ date: string; totalStock: string; recipients: number }>("ai-dividend");
+    expect(openDividend.result.date).toBe("2026-06-27");
+    expect(BigInt(openDividend.result.totalStock)).toBeGreaterThan(0n);
+  });
+
   test("lottery lifecycle covers buy, pending pancake sync, draw settlement, prize claim, and duplicate guard", async () => {
     await resetAndFund([ALICE, DEPLOYER]);
     const adminJwt = await signIn(DEPLOYER);

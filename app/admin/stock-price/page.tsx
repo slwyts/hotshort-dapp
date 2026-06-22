@@ -13,6 +13,17 @@ import { api, endpoints } from "@/lib/api";
 import { cn, formatNumber } from "@/lib/utils";
 
 type StockQuoteMode = "auto" | "manual";
+type StockMarketMode = "auto" | "manual";
+type StockMarketClosedReason = "open" | "weekend" | "manual";
+
+interface StockMarketStatus {
+  mode: StockMarketMode;
+  manualClosed: boolean;
+  autoClosed: boolean;
+  closed: boolean;
+  reason: StockMarketClosedReason;
+  tradePaused: boolean;
+}
 
 interface StockQuoteResponse {
   symbol: string;
@@ -24,6 +35,12 @@ interface StockQuoteResponse {
   fallback: boolean;
   mode: StockQuoteMode;
   tradePaused: boolean;
+  marketClosed?: boolean;
+  marketMode?: StockMarketMode;
+  manualClosed?: boolean;
+  autoClosed?: boolean;
+  marketClosedReason?: StockMarketClosedReason;
+  market?: StockMarketStatus;
 }
 
 interface StockQuoteSyncResponse {
@@ -32,22 +49,48 @@ interface StockQuoteSyncResponse {
   quote: StockQuoteResponse;
 }
 
+interface StockMarketUpdateResponse {
+  paused?: boolean;
+  tradePaused?: boolean;
+  marketClosed: boolean;
+  marketMode: StockMarketMode;
+  manualClosed: boolean;
+  autoClosed: boolean;
+  marketClosedReason: StockMarketClosedReason;
+  market: StockMarketStatus;
+}
+
 export default function AdminStockPricePage() {
   const { jwt, signIn } = useSiweJwt();
   const [price, setPrice] = useState("");
-  const [mode, setMode] = useState<StockQuoteMode>("auto");
+  const [priceMode, setPriceMode] = useState<StockQuoteMode>("auto");
   const [quote, setQuote] = useState<StockQuoteResponse | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [togglingTrade, setTogglingTrade] = useState(false);
+  const [savingMarket, setSavingMarket] = useState(false);
 
   const applyQuote = useCallback((next: StockQuoteResponse) => {
     setQuote(next);
     setPrice(String(next.priceUsdt));
-    setMode(next.mode);
+    setPriceMode(next.mode);
     setUpdatedAt(next.syncedAt ?? next.updatedAt);
+  }, []);
+
+  const mergeMarket = useCallback((next: StockMarketUpdateResponse) => {
+    setQuote((current) => current
+      ? {
+          ...current,
+          tradePaused: next.tradePaused ?? next.paused ?? next.marketClosed,
+          marketClosed: next.marketClosed,
+          marketMode: next.marketMode,
+          manualClosed: next.manualClosed,
+          autoClosed: next.autoClosed,
+          marketClosedReason: next.marketClosedReason,
+          market: next.market,
+        }
+      : current);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -95,7 +138,7 @@ export default function AdminStockPricePage() {
 
   const changeMode = async (nextMode: StockQuoteMode) => {
     const token = jwt ?? (await signIn());
-    if (!token || nextMode === mode) return;
+    if (!token || nextMode === priceMode) return;
     setSaving(true);
     try {
       const r = await api.post<StockQuoteResponse>(endpoints.adminStockPriceMode, { mode: nextMode }, token);
@@ -111,6 +154,28 @@ export default function AdminStockPricePage() {
       await Swal.fire({ icon: "error", title: "切换失败", text: (e as Error).message, background: "#141419", color: "#fff" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const changeMarketMode = async (nextMode: StockMarketMode) => {
+    const token = jwt ?? (await signIn());
+    const currentMode = quote?.marketMode ?? quote?.market?.mode ?? "auto";
+    if (!token || nextMode === currentMode) return;
+    setSavingMarket(true);
+    try {
+      const r = await api.post<StockMarketUpdateResponse>(endpoints.adminStockTrade, { mode: nextMode }, token);
+      mergeMarket(r);
+      await Swal.fire({
+        icon: "success",
+        title: nextMode === "auto" ? "已切换为自动休市" : "已切换为手动控制",
+        background: "#141419",
+        color: "#fff",
+        confirmButtonColor: "#b829ff",
+      });
+    } catch (e) {
+      await Swal.fire({ icon: "error", title: "切换失败", text: (e as Error).message, background: "#141419", color: "#fff" });
+    } finally {
+      setSavingMarket(false);
     }
   };
 
@@ -136,29 +201,30 @@ export default function AdminStockPricePage() {
     }
   };
 
-  const toggleTrade = async () => {
+  const toggleMarketClosed = async () => {
     const token = jwt ?? (await signIn());
     if (!token || !quote) return;
-    const nextPaused = !quote.tradePaused;
+    const manualClosed = quote.manualClosed ?? quote.market?.manualClosed ?? false;
+    const nextClosed = !manualClosed;
     const confirmed = await Swal.fire({
-      icon: nextPaused ? "warning" : "question",
-      title: nextPaused ? "暂停股票闪兑？" : "恢复股票闪兑？",
-      text: nextPaused ? "暂停后用户将不能买入或卖出 WTO 股票" : "恢复后用户可继续买入和卖出 WTO 股票",
+      icon: nextClosed ? "warning" : "question",
+      title: nextClosed ? "手动休市？" : "手动开市？",
+      text: nextClosed ? "休市后用户不能买入或卖出 WTO，且当天不会生成新的每日股票分红" : "开市后用户可继续买卖 WTO，后续每日分红按计划结算",
       showCancelButton: true,
-      confirmButtonText: nextPaused ? "确认暂停" : "确认恢复",
+      confirmButtonText: nextClosed ? "确认休市" : "确认开市",
       cancelButtonText: "取消",
-      confirmButtonColor: nextPaused ? "#ef4444" : "#b829ff",
+      confirmButtonColor: nextClosed ? "#ef4444" : "#b829ff",
       background: "#141419",
       color: "#fff",
     });
     if (!confirmed.isConfirmed) return;
-    setTogglingTrade(true);
+    setSavingMarket(true);
     try {
-      const r = await api.post<{ paused: boolean }>(endpoints.adminStockTrade, { paused: nextPaused }, token);
-      setQuote({ ...quote, tradePaused: r.paused });
+      const r = await api.post<StockMarketUpdateResponse>(endpoints.adminStockTrade, { manualClosed: nextClosed }, token);
+      mergeMarket(r);
       await Swal.fire({
         icon: "success",
-        title: r.paused ? "股票闪兑已暂停" : "股票闪兑已恢复",
+        title: r.marketClosed ? "市场已休市" : "市场已开市",
         background: "#141419",
         color: "#fff",
         confirmButtonColor: "#b829ff",
@@ -166,9 +232,21 @@ export default function AdminStockPricePage() {
     } catch (e) {
       await Swal.fire({ icon: "error", title: "操作失败", text: (e as Error).message, background: "#141419", color: "#fff" });
     } finally {
-      setTogglingTrade(false);
+      setSavingMarket(false);
     }
   };
+
+  const marketClosed = Boolean(quote?.marketClosed ?? quote?.tradePaused);
+  const marketMode = quote?.marketMode ?? quote?.market?.mode ?? "auto";
+  const manualClosed = Boolean(quote?.manualClosed ?? quote?.market?.manualClosed);
+  const marketText = marketClosed ? "市场休市中" : "市场开市中";
+  const marketHint = marketMode === "auto"
+    ? marketClosed
+      ? "自动模式：周末休市，不开放闪兑与当日分红"
+      : "自动模式：工作日开市，周末自动休市"
+    : marketClosed
+      ? "手动模式：当前休市，不开放闪兑与当日分红"
+      : "手动模式：当前开市，后台可随时休市";
 
   return (
     <AdminGuard>
@@ -209,26 +287,46 @@ export default function AdminStockPricePage() {
                   </div>
                 </div>
 
-                <div className={`rounded-lg border p-3 ${quote?.tradePaused ? "border-red-400/25 bg-red-400/10" : "border-green-400/20 bg-green-400/10"}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className={`text-sm font-bold ${quote?.tradePaused ? "text-red-300" : "text-green-300"}`}>
-                        股票闪兑{quote?.tradePaused ? "已暂停" : "开放中"}
+                <div className={`rounded-lg border p-3 ${marketClosed ? "border-red-400/25 bg-red-400/10" : "border-green-400/20 bg-green-400/10"}`}>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className={`text-sm font-bold ${marketClosed ? "text-red-300" : "text-green-300"}`}>
+                          {marketText}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-white/45">
+                          {marketHint}
+                        </div>
                       </div>
-                      <div className="mt-0.5 text-[11px] text-white/45">
-                        控制 HS 买入 WTO 和 WTO 卖出 HS
-                      </div>
-                    </div>
-                    <Button onClick={toggleTrade} disabled={togglingTrade || !quote} variant={quote?.tradePaused ? "outline" : "danger"} size="sm">
-                      {togglingTrade ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : quote?.tradePaused ? (
-                        <Power className="h-4 w-4" />
-                      ) : (
-                        <PowerOff className="h-4 w-4" />
+                      {marketMode === "manual" && (
+                        <Button onClick={toggleMarketClosed} disabled={savingMarket || !quote} variant={manualClosed ? "outline" : "danger"} size="sm">
+                          {savingMarket ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : manualClosed ? (
+                            <Power className="h-4 w-4" />
+                          ) : (
+                            <PowerOff className="h-4 w-4" />
+                          )}
+                          {manualClosed ? "开市" : "休市"}
+                        </Button>
                       )}
-                      {quote?.tradePaused ? "恢复" : "暂停"}
-                    </Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 rounded-md border border-white/5 bg-black/30 p-1">
+                      {(["auto", "manual"] as const).map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => void changeMarketMode(item)}
+                          disabled={savingMarket}
+                          className={cn(
+                            "h-8 rounded text-xs font-bold transition disabled:opacity-60",
+                            marketMode === item ? "bg-white/10 text-white ring-1 ring-white/15" : "text-white/45 hover:bg-white/5",
+                          )}
+                        >
+                          {item === "auto" ? "自动周末休市" : "手动控制"}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
@@ -243,7 +341,7 @@ export default function AdminStockPricePage() {
                         disabled={saving}
                         className={cn(
                           "h-9 rounded-md text-sm font-bold transition disabled:opacity-60",
-                          mode === item ? "bg-[#b829ff]/25 text-white ring-1 ring-[#b829ff]/40" : "text-white/45 hover:bg-white/5",
+                          priceMode === item ? "bg-[#b829ff]/25 text-white ring-1 ring-[#b829ff]/40" : "text-white/45 hover:bg-white/5",
                         )}
                       >
                         {item === "auto" ? "自动同步" : "手动模式"}

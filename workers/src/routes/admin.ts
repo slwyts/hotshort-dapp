@@ -6,7 +6,7 @@ import { requireUser } from "./auth";
 import { invalidateRate } from "../lib/rates";
 import { scanGenesisTransfers } from "../lib/genesis-scan";
 import { getStockQuote, setManualStockPrice, setStockQuoteMode, syncStockQuote, type StockQuoteMode } from "../lib/stocks";
-import { isStockTradePaused, setStockTradePaused } from "../lib/stock-trade";
+import { getStockMarketStatus, setStockMarketConfig, type StockMarketMode, type StockMarketStatus } from "../lib/stock-trade";
 import { readVaultOwner } from "../lib/vault-owner";
 import { ensureAgentTables, listAgentAlerts, listAgentUsers, normalizeAddress } from "../lib/agent-data";
 import { directReferralConfigKey } from "../lib/referral";
@@ -37,6 +37,19 @@ async function requireOwner(c: Context<{ Bindings: Env }>): Promise<string | nul
   } catch {
     return null;
   }
+}
+
+function withStockMarketStatus<T extends object>(quote: T, market: StockMarketStatus) {
+  return {
+    ...quote,
+    tradePaused: market.closed,
+    marketClosed: market.closed,
+    marketMode: market.mode,
+    manualClosed: market.manualClosed,
+    autoClosed: market.autoClosed,
+    marketClosedReason: market.reason,
+    market,
+  };
 }
 
 function addPressure(map: Map<Address, bigint>, token: Address, amount: bigint): void {
@@ -258,20 +271,41 @@ admin.post("/ai-config", async (c) => {
 admin.get("/stock-price", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
-  const [quote, tradePaused] = await Promise.all([
+  const [quote, market] = await Promise.all([
     getStockQuote(c.env),
-    isStockTradePaused(c.env),
+    getStockMarketStatus(c.env),
   ]);
-  return c.json({ ...quote, tradePaused });
+  return c.json(withStockMarketStatus(quote, market));
 });
 
-/** POST /admin/stock-trade  手动暂停/恢复 WTO 股票买入卖出 */
+/** POST /admin/stock-trade  WTO 股票市场自动/手动休市控制 */
 admin.post("/stock-trade", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
-  const body = (await c.req.json().catch(() => ({}))) as { paused?: boolean };
-  if (typeof body.paused !== "boolean") return c.json({ error: "bad paused" }, 400);
-  return c.json(await setStockTradePaused(c.env, body.paused, owner));
+  const body = (await c.req.json().catch(() => ({}))) as { mode?: string; paused?: boolean; manualClosed?: boolean };
+  const updates: { mode?: StockMarketMode; manualClosed?: boolean } = {};
+  if (body.mode !== undefined) {
+    if (body.mode !== "auto" && body.mode !== "manual") return c.json({ error: "bad mode" }, 400);
+    updates.mode = body.mode;
+  }
+  if (body.manualClosed !== undefined || body.paused !== undefined) {
+    const manualClosed = body.manualClosed ?? body.paused;
+    if (typeof manualClosed !== "boolean") return c.json({ error: "bad paused" }, 400);
+    updates.manualClosed = manualClosed;
+    if (!updates.mode && body.paused !== undefined) updates.mode = "manual";
+  }
+  if (!updates.mode && typeof updates.manualClosed !== "boolean") return c.json({ error: "bad payload" }, 400);
+  const market = await setStockMarketConfig(c.env, updates, owner);
+  return c.json({
+    paused: market.closed,
+    tradePaused: market.closed,
+    marketClosed: market.closed,
+    marketMode: market.mode,
+    manualClosed: market.manualClosed,
+    autoClosed: market.autoClosed,
+    marketClosedReason: market.reason,
+    market,
+  });
 });
 
 /** POST /admin/stock-price  WTO 股价手动兜底设值 */
@@ -283,7 +317,11 @@ admin.post("/stock-price", async (c) => {
   if (typeof p !== "number" || !Number.isFinite(p) || p <= 0) {
     return c.json({ error: "bad price" }, 400);
   }
-  return c.json(await setManualStockPrice(c.env, p, owner));
+  const [quote, market] = await Promise.all([
+    setManualStockPrice(c.env, p, owner),
+    getStockMarketStatus(c.env),
+  ]);
+  return c.json(withStockMarketStatus(quote, market));
 });
 
 /** POST /admin/stock-price/mode  自动同步开关 */
@@ -292,7 +330,11 @@ admin.post("/stock-price/mode", async (c) => {
   if (!owner) return c.json({ error: "forbidden" }, 403);
   const body = (await c.req.json().catch(() => ({}))) as { mode?: string };
   if (body.mode !== "auto" && body.mode !== "manual") return c.json({ error: "bad mode" }, 400);
-  return c.json(await setStockQuoteMode(c.env, body.mode as StockQuoteMode, owner));
+  const [quote, market] = await Promise.all([
+    setStockQuoteMode(c.env, body.mode as StockQuoteMode, owner),
+    getStockMarketStatus(c.env),
+  ]);
+  return c.json(withStockMarketStatus(quote, market));
 });
 
 /** POST /admin/stock-price/sync  立即从 Yahoo Finance 同步 WTO 股价 */
@@ -300,7 +342,8 @@ admin.post("/stock-price/sync", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
   const result = await syncStockQuote(c.env, { force: true, updatedBy: owner });
-  return c.json(result);
+  const market = await getStockMarketStatus(c.env);
+  return c.json({ ...result, quote: withStockMarketStatus(result.quote, market) });
 });
 
 /** GET /admin/lottery-config / POST  彩票区间 + 票价 */
@@ -638,6 +681,9 @@ async function seedDefaults(env: Env, at: number): Promise<void> {
     ["stock_symbol", "WTO"],
     ["stock_price_provider", "manual"],
     ["stock_quote_mode", "auto"],
+    ["stock_market_mode", "auto"],
+    ["stock_market_manual_closed", "0"],
+    ["stock_trade_paused", "0"],
     ["stock_volume_min_usdt", "100000"],
     ["stock_volume_max_usdt", "200000"],
     ["stock_dividend_ratio_bps", "100"],

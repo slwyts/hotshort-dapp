@@ -2,6 +2,7 @@ import type { Env } from "../env";
 import { ulid } from "./ulid";
 import { addStock, getStockPriceUsdt } from "./stocks";
 import { recordThreeGenReferral } from "./referral";
+import { getStockMarketStatus } from "./stock-trade";
 import { todayBeijing } from "./time";
 import {
   AI_DIVIDEND_TIER_SHARE_BPS,
@@ -46,6 +47,9 @@ function secureRandomUnit(): number {
  */
 export async function settleAiDividend(env: Env): Promise<{ date: string; totalStock: string; recipients: number } | null> {
   const date = await todayBeijing(env);
+  const market = await getStockMarketStatus(env);
+  if (market.closed) return null;
+
   const exists = await env.DB.prepare(
     "SELECT settled FROM ai_dividend_pool_daily WHERE date = ?",
   )

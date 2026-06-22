@@ -27,6 +27,11 @@ import {
 interface DividendResponse {
   today: string;
   stock?: { symbol: string; name: string; priceUsdt: number; source: string; updatedAt: number | null; fallback: boolean };
+  marketClosed?: boolean;
+  marketMode?: "auto" | "manual";
+  manualClosed?: boolean;
+  autoClosed?: boolean;
+  marketClosedReason?: "open" | "weekend" | "manual";
   holdings: { totalStock: string; lockedStock: string };
   dividend: { date: string; stock_share: string; claimed: number };
   claimable?: { personalStock: string; teamStock: string; otherStock: string; totalStock: string };
@@ -199,6 +204,7 @@ export default function DividendPage() {
   const heldOneMonth = Boolean(monthlyEligibleAt && serverNow != null && serverNow >= monthlyEligibleAt);
   const airdropReady = enoughStock && heldOneMonth;
   const monthlyEligibleDate = monthlyEligibleAt ? new Date(monthlyEligibleAt * 1000).toLocaleDateString("zh-CN") : "—";
+  const marketClosed = Boolean(data.marketClosed);
 
   return (
     <PageShell>
@@ -247,6 +253,12 @@ export default function DividendPage() {
           <div className="rounded-md border border-white/5 bg-black/30 px-3 py-2 text-[11px] text-white/45">
             WTO 价格：${formatNumber(stockPrice, 4)} · {data.stock?.source ?? "manual"}{data.stock?.fallback ? " 兜底价" : ""}
           </div>
+
+          {marketClosed && (
+            <div className="rounded-md border border-red-400/25 bg-red-400/10 px-3 py-2 text-[11px] leading-relaxed text-red-200">
+              {t("ai.div.marketClosed")}
+            </div>
+          )}
 
           <Button
             onClick={claim}

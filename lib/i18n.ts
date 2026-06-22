@@ -225,6 +225,7 @@ const zh = {
   "ai.div.otherIncluded": "含其他奖励 {amount} 股 ·",
   "ai.div.unit": "股",
   "ai.div.claim": "一键领取（含团队奖励）",
+  "ai.div.marketClosed": "今日休市，不生成新的股票分红；历史待领仍可领取。",
   "ai.div.airdropTitle": "HS 空投奖励",
   "ai.div.airdropDesc": "持股 ≥ {min} 股并满 1 个月 · 钱包至少 {hs}U HS",
   "ai.div.airdropOk": "已达月度领取条件，可领取 {period} 及更早未领空投",
@@ -290,8 +291,8 @@ const zh = {
   "ai.sell.success.body": "已卖出 {stock} WTO，收到 {hs} HS",
   "ai.sell.failed.title": "卖出失败",
   "ai.sell.failed.afterSigned": "卖出记录已生成，但钱包领取未完成。请稍后查看交易状态或联系后台处理。",
-  "ai.tradePaused.title": "股票交易已暂停",
-  "ai.tradePaused.body": "当前暂不支持买入或卖出 WTO 股票，请稍后再试。",
+  "ai.tradePaused.title": "股票市场休市中",
+  "ai.tradePaused.body": "当前休市，暂不支持买入或卖出 WTO 股票，请开市后再试。",
 
   // ===== 彩票 =====
   "lot.poolLabel": "第 {round} 期 · 本期奖池",
@@ -767,6 +768,7 @@ const en: Record<string, string> = {
   "ai.div.otherIncluded": "incl. other rewards {amount} shares ·",
   "ai.div.unit": "shares",
   "ai.div.claim": "Claim all (incl. team rewards)",
+  "ai.div.marketClosed": "Market closed today. No new stock dividend is generated; historical pending rewards can still be claimed.",
   "ai.div.airdropTitle": "HS airdrop",
   "ai.div.airdropDesc": "Hold ≥ {min} stocks for 1 month · Wallet ≥ {hs}U HS",
   "ai.div.airdropOk": "Monthly claim ready for {period} and earlier unclaimed airdrops",
@@ -832,8 +834,8 @@ const en: Record<string, string> = {
   "ai.sell.success.body": "Sold {stock} WTO and received {hs} HS",
   "ai.sell.failed.title": "Sale failed",
   "ai.sell.failed.afterSigned": "The sale record was created, but the wallet claim was not completed. Check the transaction later or contact support.",
-  "ai.tradePaused.title": "Stock trading paused",
-  "ai.tradePaused.body": "Buying or selling WTO is temporarily unavailable. Please try again later.",
+  "ai.tradePaused.title": "Stock market closed",
+  "ai.tradePaused.body": "The market is closed. Buying or selling WTO is unavailable until it opens.",
 
   // ===== Lottery =====
   "lot.poolLabel": "Round {round} · Prize pool",
