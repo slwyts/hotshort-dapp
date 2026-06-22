@@ -31,6 +31,7 @@ interface SellQuote {
   feeBps: number;
   usdtOut: string;
   enough: boolean;
+  tradePaused?: boolean;
 }
 
 interface SellResponse {
@@ -112,6 +113,10 @@ export default function AiSellPage() {
     }
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       await Swal.fire({ icon: "warning", title: t("ai.sell.invalid"), background: "#141419", color: "#fff" });
+      return;
+    }
+    if (quote?.tradePaused) {
+      await Swal.fire({ icon: "warning", title: t("ai.tradePaused.title"), text: t("ai.tradePaused.body"), background: "#141419", color: "#fff" });
       return;
     }
     if (amountNum > available) {
@@ -237,7 +242,13 @@ export default function AiSellPage() {
                 {t("ai.sell.priceHint")}
               </div>
 
-              <Button onClick={submit} disabled={submitting || insufficient || available <= 0} size="lg" className="w-full">
+              {quote.tradePaused && (
+                <div className="rounded-md border border-red-400/25 bg-red-400/10 px-3 py-2 text-[11px] text-red-200">
+                  {t("ai.tradePaused.body")}
+                </div>
+              )}
+
+              <Button onClick={submit} disabled={submitting || insufficient || available <= 0 || quote.tradePaused} size="lg" className="w-full">
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 {submitting ? t("common.processing") : t("ai.sell.confirm")}
               </Button>

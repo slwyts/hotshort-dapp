@@ -6,6 +6,7 @@ import { requireUser } from "./auth";
 import { invalidateRate } from "../lib/rates";
 import { scanGenesisTransfers } from "../lib/genesis-scan";
 import { getStockQuote, setManualStockPrice, setStockQuoteMode, syncStockQuote, type StockQuoteMode } from "../lib/stocks";
+import { isStockTradePaused, setStockTradePaused } from "../lib/stock-trade";
 import { readVaultOwner } from "../lib/vault-owner";
 import { ensureAgentTables, listAgentAlerts, listAgentUsers, normalizeAddress } from "../lib/agent-data";
 import { directReferralConfigKey } from "../lib/referral";
@@ -257,7 +258,20 @@ admin.post("/ai-config", async (c) => {
 admin.get("/stock-price", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
-  return c.json(await getStockQuote(c.env));
+  const [quote, tradePaused] = await Promise.all([
+    getStockQuote(c.env),
+    isStockTradePaused(c.env),
+  ]);
+  return c.json({ ...quote, tradePaused });
+});
+
+/** POST /admin/stock-trade  手动暂停/恢复 WTO 股票买入卖出 */
+admin.post("/stock-trade", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  const body = (await c.req.json().catch(() => ({}))) as { paused?: boolean };
+  if (typeof body.paused !== "boolean") return c.json({ error: "bad paused" }, 400);
+  return c.json(await setStockTradePaused(c.env, body.paused, owner));
 });
 
 /** POST /admin/stock-price  WTO 股价手动兜底设值 */

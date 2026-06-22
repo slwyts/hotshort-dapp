@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, Save, Coins, ChevronLeft, RefreshCw } from "lucide-react";
+import { Loader2, Save, Coins, ChevronLeft, RefreshCw, Power, PowerOff } from "lucide-react";
 import Swal from "sweetalert2";
 import { AdminGuard } from "@/components/admin-guard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +23,7 @@ interface StockQuoteResponse {
   syncedAt: number | null;
   fallback: boolean;
   mode: StockQuoteMode;
+  tradePaused: boolean;
 }
 
 interface StockQuoteSyncResponse {
@@ -40,6 +41,7 @@ export default function AdminStockPricePage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [togglingTrade, setTogglingTrade] = useState(false);
 
   const applyQuote = useCallback((next: StockQuoteResponse) => {
     setQuote(next);
@@ -134,6 +136,40 @@ export default function AdminStockPricePage() {
     }
   };
 
+  const toggleTrade = async () => {
+    const token = jwt ?? (await signIn());
+    if (!token || !quote) return;
+    const nextPaused = !quote.tradePaused;
+    const confirmed = await Swal.fire({
+      icon: nextPaused ? "warning" : "question",
+      title: nextPaused ? "暂停股票闪兑？" : "恢复股票闪兑？",
+      text: nextPaused ? "暂停后用户将不能买入或卖出 WTO 股票" : "恢复后用户可继续买入和卖出 WTO 股票",
+      showCancelButton: true,
+      confirmButtonText: nextPaused ? "确认暂停" : "确认恢复",
+      cancelButtonText: "取消",
+      confirmButtonColor: nextPaused ? "#ef4444" : "#b829ff",
+      background: "#141419",
+      color: "#fff",
+    });
+    if (!confirmed.isConfirmed) return;
+    setTogglingTrade(true);
+    try {
+      const r = await api.post<{ paused: boolean }>(endpoints.adminStockTrade, { paused: nextPaused }, token);
+      setQuote({ ...quote, tradePaused: r.paused });
+      await Swal.fire({
+        icon: "success",
+        title: r.paused ? "股票闪兑已暂停" : "股票闪兑已恢复",
+        background: "#141419",
+        color: "#fff",
+        confirmButtonColor: "#b829ff",
+      });
+    } catch (e) {
+      await Swal.fire({ icon: "error", title: "操作失败", text: (e as Error).message, background: "#141419", color: "#fff" });
+    } finally {
+      setTogglingTrade(false);
+    }
+  };
+
   return (
     <AdminGuard>
       <div className="container mx-auto px-4 py-12 sm:px-6">
@@ -170,6 +206,29 @@ export default function AdminStockPricePage() {
                     <div className="text-[10px] uppercase tracking-widest text-white/35">来源</div>
                     <div className="mt-1 text-sm font-bold text-white/80">{quote?.source ?? "manual"}</div>
                     <div className="mt-0.5 text-[11px] text-white/40">{quote?.fallback ? "兜底价" : "实时行情"}</div>
+                  </div>
+                </div>
+
+                <div className={`rounded-lg border p-3 ${quote?.tradePaused ? "border-red-400/25 bg-red-400/10" : "border-green-400/20 bg-green-400/10"}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className={`text-sm font-bold ${quote?.tradePaused ? "text-red-300" : "text-green-300"}`}>
+                        股票闪兑{quote?.tradePaused ? "已暂停" : "开放中"}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-white/45">
+                        控制 HS 买入 WTO 和 WTO 卖出 HS
+                      </div>
+                    </div>
+                    <Button onClick={toggleTrade} disabled={togglingTrade || !quote} variant={quote?.tradePaused ? "outline" : "danger"} size="sm">
+                      {togglingTrade ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : quote?.tradePaused ? (
+                        <Power className="h-4 w-4" />
+                      ) : (
+                        <PowerOff className="h-4 w-4" />
+                      )}
+                      {quote?.tradePaused ? "恢复" : "暂停"}
+                    </Button>
                   </div>
                 </div>
 

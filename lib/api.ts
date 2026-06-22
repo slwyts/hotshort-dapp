@@ -102,6 +102,7 @@ export const endpoints = {
   adminStockPrice: "/admin/stock-price",
   adminStockPriceMode: "/admin/stock-price/mode",
   adminStockPriceSync: "/admin/stock-price/sync",
+  adminStockTrade: "/admin/stock-trade",
   adminAiConfig: "/admin/ai-config",
   adminTimeDebug: "/admin/time-debug",
   adminResetDb: "/admin/reset-db",

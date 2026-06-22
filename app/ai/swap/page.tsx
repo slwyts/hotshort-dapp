@@ -33,6 +33,7 @@ export default function SwapPage() {
   const [submitting, setSubmitting] = useState(false);
   const [hsPrice, setHsPrice] = useState<number | null>(null);
   const [stockPrice, setStockPrice] = useState<number | null>(null);
+  const [tradePaused, setTradePaused] = useState(false);
 
   const { data: hsBal } = useReadContract({
     abi: ERC20_ABI,
@@ -46,10 +47,11 @@ export default function SwapPage() {
   useEffect(() => {
     void Promise.all([
       api.get<{ priceUsdt: number }>(endpoints.hsPrice).catch(() => ({ priceUsdt: 0.001 })),
-      api.get<{ priceUsdt: number }>(endpoints.stockPrice).catch(() => ({ priceUsdt: 1 })),
+      api.get<{ priceUsdt: number; tradePaused?: boolean }>(endpoints.stockPrice).catch(() => ({ priceUsdt: 1, tradePaused: false })),
     ]).then(([h, s]) => {
       setHsPrice(h.priceUsdt);
       setStockPrice(s.priceUsdt);
+      setTradePaused(Boolean(s.tradePaused));
     });
   }, []);
 
@@ -62,6 +64,10 @@ export default function SwapPage() {
   const submit = async () => {
     if (!isConnected || !address) {
       await Swal.fire({ icon: "warning", title: t("common.connectFirst"), background: "#141419", color: "#fff" });
+      return;
+    }
+    if (tradePaused) {
+      await Swal.fire({ icon: "warning", title: t("ai.tradePaused.title"), text: t("ai.tradePaused.body"), background: "#141419", color: "#fff" });
       return;
     }
     const amountNum = Number(hs);
@@ -200,7 +206,13 @@ export default function SwapPage() {
             {t("ai.swap.availableHint")}
           </div>
 
-          <Button onClick={submit} disabled={submitting} size="lg" className="w-full">
+          {tradePaused && (
+            <div className="rounded-md border border-red-400/25 bg-red-400/10 px-3 py-2 text-[11px] text-red-200">
+              {t("ai.tradePaused.body")}
+            </div>
+          )}
+
+          <Button onClick={submit} disabled={submitting || tradePaused} size="lg" className="w-full">
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : t("ai.swap.confirm")}
           </Button>
         </CardContent>

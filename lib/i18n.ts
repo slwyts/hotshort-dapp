@@ -290,6 +290,8 @@ const zh = {
   "ai.sell.success.body": "已卖出 {stock} WTO，收到 {hs} HS",
   "ai.sell.failed.title": "卖出失败",
   "ai.sell.failed.afterSigned": "卖出记录已生成，但钱包领取未完成。请稍后查看交易状态或联系后台处理。",
+  "ai.tradePaused.title": "股票交易已暂停",
+  "ai.tradePaused.body": "当前暂不支持买入或卖出 WTO 股票，请稍后再试。",
 
   // ===== 彩票 =====
   "lot.poolLabel": "第 {round} 期 · 本期奖池",
@@ -830,6 +832,8 @@ const en: Record<string, string> = {
   "ai.sell.success.body": "Sold {stock} WTO and received {hs} HS",
   "ai.sell.failed.title": "Sale failed",
   "ai.sell.failed.afterSigned": "The sale record was created, but the wallet claim was not completed. Check the transaction later or contact support.",
+  "ai.tradePaused.title": "Stock trading paused",
+  "ai.tradePaused.body": "Buying or selling WTO is temporarily unavailable. Please try again later.",
 
   // ===== Lottery =====
   "lot.poolLabel": "Round {round} · Prize pool",
