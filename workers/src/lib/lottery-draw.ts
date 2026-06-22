@@ -91,7 +91,7 @@ async function mapCurrentRoundToPancake(env: Env, now: number): Promise<{
  * 若薄饼当期结果暂未可读，返回 pending，不结算本期，也不推进下一轮。
  *
  * 可选 forceWinning：管理员手动指定 6 位中奖号，跳过薄饼同步直接开奖。
- *   适用：测试 / 薄饼当周开奖延迟兜底。
+ *   适用：测试 / 薄饼当期开奖结果延迟兜底。
  */
 export async function drawLottery(
   env: Env,

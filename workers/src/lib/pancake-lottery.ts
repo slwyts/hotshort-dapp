@@ -23,12 +23,14 @@ const PANCAKE_LOTTERY_ABI = [
         { name: "endTime", type: "uint256" },
         { name: "priceTicketInCake", type: "uint256" },
         { name: "discountDivisor", type: "uint256" },
-        { name: "rewardsBreakdown", type: "uint256" },
+        { name: "rewardsBreakdown", type: "uint256[6]" },
         { name: "treasuryFee", type: "uint256" },
-        { name: "cakePerBracket", type: "uint256" },
+        { name: "cakePerBracket", type: "uint256[6]" },
         { name: "countWinnersPerBracket", type: "uint256[6]" },
-        { name: "rewardsPerBracket", type: "uint256[6]" },
-        { name: "finalNumber", type: "uint256" },
+        { name: "firstTicketId", type: "uint256" },
+        { name: "firstTicketIdNextLottery", type: "uint256" },
+        { name: "amountCollectedInCake", type: "uint256" },
+        { name: "finalNumber", type: "uint32" },
       ],
     }],
   },
@@ -86,10 +88,11 @@ export async function readPancakeLottery(env: Env, lotteryId: number | bigint): 
   const status = Array.isArray(lottery) ? Number(lottery[0]) : Number((lottery as { status?: bigint | number }).status ?? 0);
   const startTime = Array.isArray(lottery) ? Number(lottery[1]) : Number((lottery as { startTime?: bigint | number }).startTime ?? 0);
   const endTime = Array.isArray(lottery) ? Number(lottery[2]) : Number((lottery as { endTime?: bigint | number }).endTime ?? 0);
-  const finalNumber = Array.isArray(lottery)
+  const rawFinalNumber = Array.isArray(lottery)
     ? lottery[12]
-    : (lottery as { finalNumber?: bigint }).finalNumber;
-  if (typeof finalNumber !== "bigint") return null;
+    : (lottery as { finalNumber?: bigint | number }).finalNumber;
+  if (rawFinalNumber === undefined) return null;
+  const finalNumber = BigInt(rawFinalNumber);
   return {
     lotteryId: Number(id),
     status,

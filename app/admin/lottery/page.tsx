@@ -71,7 +71,7 @@ export default function AdminLotteryPage() {
       title: useForce ? `用 ${forceWinning.trim()} 开奖？` : "确认手动开奖？",
       text: useForce
         ? "将跳过薄饼同步直接以此号码结算本期"
-        : "通常由系统每周一自动开奖，仅紧急情况手动触发",
+        : "通常由系统跟随 Pancake 自动开奖，仅紧急情况手动触发",
       showCancelButton: true,
       confirmButtonText: "确认开奖",
       confirmButtonColor: "#b829ff",
