@@ -60,3 +60,17 @@ export interface AgentTransaction {
   sourceRef?: string | null;
   extra?: Record<string, unknown>;
 }
+
+export interface AgentTeamTransaction extends AgentTransaction {
+  generation: number;
+  referrer: string | null;
+  referralCode: string | null;
+}
+
+export interface AgentTransactionSummary {
+  count: number;
+  totalInUsdt: string;
+  totalOutUsdt: string;
+  totalSpendUsdt: string;
+  totalCreditUsdt: string;
+}

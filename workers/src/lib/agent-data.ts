@@ -53,6 +53,11 @@ interface InternalTransaction extends AgentTransaction {
   usdtWei: bigint;
 }
 
+interface InternalTeamTransaction extends Omit<AgentTeamTransaction, "usdtValue"> {
+  usdtValue: string;
+  usdtWei: bigint;
+}
+
 export interface AgentAlert {
   id: string;
   user: string;
@@ -67,11 +72,28 @@ export interface AgentAlert {
   sourceRef?: string | null;
 }
 
-type AgentPathRow = {
+export interface AgentDateRange {
+  from?: number;
+  to?: number;
+}
+
+export interface AgentTeamTransaction extends AgentTransaction {
+  generation: number;
+  referrer: string | null;
+  referralCode: string | null;
+}
+
+export interface AgentTransactionSummary {
+  count: number;
+  totalInUsdt: string;
+  totalOutUsdt: string;
+  totalSpendUsdt: string;
+  totalCreditUsdt: string;
+}
+
+type AgentDownlineRow = {
   user: string;
-  level1: string | null;
-  level2: string | null;
-  level3: string | null;
+  generation: number;
   referrer: string | null;
   code: string | null;
   joined_at: number | null;
@@ -132,15 +154,19 @@ function formatWei(value: bigint, decimals = 2): string {
   return fraction ? `${sign}${whole.toString()}.${fraction}` : `${sign}${whole.toString()}`;
 }
 
-function generationFor(row: Pick<AgentPathRow, "level1" | "level2" | "level3">, agent: string): number {
-  if (row.level1 === agent) return 1;
-  if (row.level2 === agent) return 2;
-  if (row.level3 === agent) return 3;
-  return 0;
-}
-
 function tokenAmountLabel(token: string, amount: string): string {
   return `${formatWei(parseWei(amount), 4)} ${token}`;
+}
+
+function hasDateRange(range?: AgentDateRange): boolean {
+  return range?.from !== undefined || range?.to !== undefined;
+}
+
+function inDateRange(seconds: number | null | undefined, range?: AgentDateRange): boolean {
+  if (!seconds) return false;
+  if (range?.from !== undefined && seconds < range.from) return false;
+  if (range?.to !== undefined && seconds >= range.to) return false;
+  return true;
 }
 
 async function rewardTokenToUsdtWei(env: Env, token: string, amountWei: bigint): Promise<bigint> {
@@ -156,6 +182,43 @@ async function claimTokenToUsdtWei(env: Env, token: string, amountWei: bigint): 
   if (normalized === env.USDT_TOKEN.toLowerCase()) return { token: "USDT", usdtWei: amountWei };
   if (normalized === env.HS_TOKEN.toLowerCase()) return { token: "HS", usdtWei: await hsWeiToUsdtWei(env, amountWei) };
   return { token, usdtWei: 0n };
+}
+
+async function claimRowSummary(
+  env: Env,
+  row: { token: string; amount: string; recipients_json?: string | null },
+): Promise<{ token: string; amountLabel: string; usdtWei: bigint }> {
+  if (row.recipients_json) {
+    try {
+      const parsed = JSON.parse(row.recipients_json) as { tokens?: string[]; amounts?: string[] };
+      if (parsed.tokens?.length && parsed.amounts?.length && parsed.tokens.length === parsed.amounts.length) {
+        let totalUsdtWei = 0n;
+        const grouped = new Map<string, bigint>();
+        for (let index = 0; index < parsed.tokens.length; index++) {
+          const amountWei = parseWei(parsed.amounts[index]);
+          const converted = await claimTokenToUsdtWei(env, parsed.tokens[index], amountWei);
+          totalUsdtWei += converted.usdtWei;
+          grouped.set(converted.token, (grouped.get(converted.token) ?? 0n) + amountWei);
+        }
+        const parts = [...grouped.entries()].map(([token, amount]) => tokenAmountLabel(token, amount.toString()));
+        return {
+          token: parts.length === 1 ? [...grouped.keys()][0] : "MULTI",
+          amountLabel: parts.join(" + "),
+          usdtWei: totalUsdtWei,
+        };
+      }
+    } catch {
+      // Fall back to legacy single-token columns below.
+    }
+  }
+
+  const amountWei = parseWei(row.amount);
+  const converted = await claimTokenToUsdtWei(env, row.token, amountWei);
+  return {
+    token: converted.token,
+    amountLabel: tokenAmountLabel(converted.token, row.amount),
+    usdtWei: converted.usdtWei,
+  };
 }
 
 export async function readAgentAccount(env: Env, address: string): Promise<AgentAccount | null> {
@@ -178,20 +241,30 @@ export async function listAgentUsers(env: Env, agentAddress: string, q = ""): Pr
   const agent = normalizeAddress(agentAddress);
   if (!agent) return [];
   const rs = await env.DB.prepare(
-    `SELECT rp.user, rp.level1, rp.level2, rp.level3, u.referrer, u.joined_at, u.last_active_at, rc.code
-       FROM referral_paths rp
-       LEFT JOIN users u ON u.address = rp.user
-       LEFT JOIN referral_codes rc ON rc.user = rp.user
-      WHERE rp.level1 = ? OR rp.level2 = ? OR rp.level3 = ?`,
+    `WITH RECURSIVE downline(user, generation, path) AS (
+       SELECT address, 1, address
+         FROM users
+        WHERE referrer = ?
+       UNION ALL
+       SELECT u.address, downline.generation + 1, downline.path || ',' || u.address
+         FROM users u
+         JOIN downline ON u.referrer = downline.user
+        WHERE downline.generation < 100
+          AND instr(downline.path, u.address) = 0
+     )
+     SELECT downline.user, downline.generation, u.referrer, u.joined_at, u.last_active_at, rc.code
+       FROM downline
+       LEFT JOIN users u ON u.address = downline.user
+       LEFT JOIN referral_codes rc ON rc.user = downline.user`,
   )
-    .bind(agent, agent, agent)
-    .all<AgentPathRow>();
+    .bind(agent)
+    .all<AgentDownlineRow>();
 
   const needle = q.trim().toLowerCase();
   return (rs.results ?? [])
     .map((row) => ({
       address: row.user,
-      generation: generationFor(row, agent),
+      generation: row.generation,
       referrer: row.referrer,
       referralCode: row.code,
       joinedAt: row.joined_at,
@@ -282,12 +355,12 @@ export async function getUserFinancialSummary(env: Env, userAddress: string): Pr
     pendingUsdtWei += await rewardTokenToUsdtWei(env, row.reward_token, parseWei(row.reward_amount));
   }
 
-  const claimRows = await env.DB.prepare("SELECT token, amount FROM claim_signatures WHERE user = ?")
+  const claimRows = await env.DB.prepare("SELECT token, amount, recipients_json FROM claim_signatures WHERE user = ? AND used_at IS NOT NULL")
     .bind(user)
-    .all<{ token: string; amount: string }>();
+    .all<{ token: string; amount: string; recipients_json: string | null }>();
   let totalOutUsdtWei = 0n;
   for (const row of claimRows.results ?? []) {
-    totalOutUsdtWei += (await claimTokenToUsdtWei(env, row.token, parseWei(row.amount))).usdtWei;
+    totalOutUsdtWei += (await claimRowSummary(env, row)).usdtWei;
   }
 
   return {
@@ -305,11 +378,20 @@ function serializeTransaction(tx: InternalTransaction): AgentTransaction {
   return { ...rest, usdtValue: formatWei(usdtWei) };
 }
 
+function serializeTeamTransaction(tx: InternalTeamTransaction): AgentTeamTransaction {
+  const { usdtWei, ...rest } = tx;
+  return { ...rest, usdtValue: formatWei(usdtWei) };
+}
+
 export async function listUserTransactions(env: Env, userAddress: string): Promise<AgentTransaction[]> {
   return (await listInternalUserTransactions(env, userAddress)).map(serializeTransaction);
 }
 
-async function listInternalUserTransactions(env: Env, userAddress: string): Promise<InternalTransaction[]> {
+async function listInternalUserTransactions(
+  env: Env,
+  userAddress: string,
+  options: { range?: AgentDateRange; actualClaimsOnly?: boolean } = {},
+): Promise<InternalTransaction[]> {
   const user = normalizeAddress(userAddress);
   if (!user) return [];
   const txs: InternalTransaction[] = [];
@@ -419,21 +501,22 @@ async function listInternalUserTransactions(env: Env, userAddress: string): Prom
     });
   }
 
-  const claimRows = await env.DB.prepare("SELECT nonce, token, amount, used_at, created_at FROM claim_signatures WHERE user = ?")
+  const claimRows = await env.DB.prepare("SELECT nonce, token, amount, recipients_json, used_at, created_at FROM claim_signatures WHERE user = ?")
     .bind(user)
-    .all<{ nonce: string; token: string; amount: string; used_at: number | null; created_at: number }>();
+    .all<{ nonce: string; token: string; amount: string; recipients_json: string | null; used_at: number | null; created_at: number }>();
   for (const row of claimRows.results ?? []) {
-    const converted = await claimTokenToUsdtWei(env, row.token, parseWei(row.amount));
+    if (options.actualClaimsOnly && !row.used_at) continue;
+    const claim = await claimRowSummary(env, row);
     txs.push({
       id: `claim:${row.nonce}`,
       user,
       type: "claim",
       label: "链上领取出金",
       direction: "withdraw",
-      token: converted.token,
-      amount: tokenAmountLabel(converted.token, row.amount),
+      token: claim.token,
+      amount: claim.amountLabel,
       usdtValue: "0",
-      usdtWei: converted.usdtWei,
+      usdtWei: claim.usdtWei,
       occurredAt: row.used_at ?? row.created_at,
       status: row.used_at ? "used" : "pending",
       sourceRef: row.nonce,
@@ -459,7 +542,63 @@ async function listInternalUserTransactions(env: Env, userAddress: string): Prom
     });
   }
 
-  return txs.sort((a, b) => b.occurredAt - a.occurredAt);
+  const filtered = hasDateRange(options.range) ? txs.filter((tx) => inDateRange(tx.occurredAt, options.range)) : txs;
+  return filtered.sort((a, b) => b.occurredAt - a.occurredAt);
+}
+
+export async function listAgentTransactions(
+  env: Env,
+  agentAddress: string,
+  filters: {
+    range?: AgentDateRange;
+    q?: string;
+    direction?: AgentTransaction["direction"] | "all";
+    type?: string;
+  } = {},
+): Promise<{ items: AgentTeamTransaction[]; summary: AgentTransactionSummary }> {
+  const users = await listAgentUsers(env, agentAddress, filters.q ?? "");
+  const items: InternalTeamTransaction[] = [];
+
+  for (const user of users) {
+    const txs = await listInternalUserTransactions(env, user.address, {
+      range: filters.range,
+      actualClaimsOnly: true,
+    });
+    for (const tx of txs) {
+      if (filters.direction && filters.direction !== "all" && tx.direction !== filters.direction) continue;
+      if (filters.type && filters.type !== "all" && tx.type !== filters.type) continue;
+      items.push({
+        ...tx,
+        generation: user.generation,
+        referrer: user.referrer,
+        referralCode: user.referralCode,
+      });
+    }
+  }
+
+  items.sort((a, b) => b.occurredAt - a.occurredAt);
+
+  let totalIn = 0n;
+  let totalOut = 0n;
+  let totalSpend = 0n;
+  let totalCredit = 0n;
+  for (const item of items) {
+    if (item.direction === "deposit") totalIn += item.usdtWei;
+    if (item.direction === "withdraw") totalOut += item.usdtWei;
+    if (item.direction === "spend") totalSpend += item.usdtWei;
+    if (item.direction === "credit") totalCredit += item.usdtWei;
+  }
+
+  return {
+    items: items.map(serializeTeamTransaction),
+    summary: {
+      count: items.length,
+      totalInUsdt: formatWei(totalIn),
+      totalOutUsdt: formatWei(totalOut),
+      totalSpendUsdt: formatWei(totalSpend),
+      totalCreditUsdt: formatWei(totalCredit),
+    },
+  };
 }
 
 export async function getAgentSummary(env: Env, agentAddress: string): Promise<{

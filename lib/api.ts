@@ -111,6 +111,7 @@ export const endpoints = {
   agentMe: "/agent/me",
   agentSummary: "/agent/summary",
   agentUsers: "/agent/users",
+  agentTransactions: "/agent/transactions",
   agentUserDetail: (address: string) => `/agent/users/${encodeURIComponent(address)}`,
   agentUserTransactions: (address: string) => `/agent/users/${encodeURIComponent(address)}/transactions`,
   agentAlerts: "/agent/alerts",

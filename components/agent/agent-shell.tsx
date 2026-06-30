@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, LayoutDashboard, Users } from "lucide-react";
+import { Bell, LayoutDashboard, ReceiptText, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const nav = [
   { href: "/agent", label: "总览", icon: LayoutDashboard },
   { href: "/agent/users", label: "用户", icon: Users },
+  { href: "/agent/transactions", label: "流水", icon: ReceiptText },
   { href: "/agent/alerts", label: "预警", icon: Bell },
 ];
 
@@ -18,7 +19,7 @@ export function AgentShell({ children }: { children: React.ReactNode }) {
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-black text-white">代理商后台</h1>
-          <p className="mt-1 text-sm text-white/50">只读查看旗下三代用户数据、交易明细和大额预警。</p>
+          <p className="mt-1 text-sm text-white/50">查看旗下所有层级用户数据、交易明细和大额预警</p>
         </div>
         <div className="flex overflow-x-auto rounded-lg border border-white/10 bg-black/35 p-1">
           {nav.map((item) => {
