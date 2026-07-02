@@ -116,7 +116,7 @@ export async function recordDirectReferral(env: Env, params: {
 /**
  * 每日股票分红的三代返佣。
  * §2.4(3) 仅下级等级高于自身时减半（AI_3GEN_DOWNGRADE_BPS=5000 → 50%）。
- * 基数为下级当日分得的 WTO 股票数量。
+ * 基数为下级当日分得的 FXHO 股票数量。
  */
 export async function recordThreeGenReferral(env: Env, params: {
   source: string;

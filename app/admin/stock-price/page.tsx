@@ -189,7 +189,7 @@ export default function AdminStockPricePage() {
       await Swal.fire({
         icon: r.synced ? "success" : "warning",
         title: r.synced ? "同步成功" : "同步未完成",
-        text: r.synced ? `WTO 当前价格 $${formatNumber(r.quote.priceUsdt, 4)}` : "行情源暂时不可用，继续使用当前价格",
+        text: r.synced ? `FXHO 当前价格 $${formatNumber(r.quote.priceUsdt, 4)}` : "行情源暂时不可用，继续使用当前价格",
         background: "#141419",
         color: "#fff",
         confirmButtonColor: "#b829ff",
@@ -209,7 +209,7 @@ export default function AdminStockPricePage() {
     const confirmed = await Swal.fire({
       icon: nextClosed ? "warning" : "question",
       title: nextClosed ? "手动休市？" : "手动开市？",
-      text: nextClosed ? "休市后用户不能买入或卖出 WTO，且当天不会生成新的每日股票分红" : "开市后用户可继续买卖 WTO，后续每日分红按计划结算",
+      text: nextClosed ? "休市后用户不能买入或卖出 FXHO，且当天不会生成新的每日股票分红" : "开市后用户可继续买卖 FXHO，后续每日分红按计划结算",
       showCancelButton: true,
       confirmButtonText: nextClosed ? "确认休市" : "确认开市",
       cancelButtonText: "取消",
@@ -258,12 +258,12 @@ export default function AdminStockPricePage() {
           <Coins className="h-6 w-6 text-[#00c6ff]" /> 股价管理
         </h1>
         <p className="mt-1 text-sm text-white/50">
-          WTO 股价用于套餐赠股、HS 闪兑和每日分红折算
+          FXHO 股价用于套餐赠股、HS 闪兑和每日分红折算
         </p>
 
         <Card className="mt-8 max-w-xl">
           <CardHeader>
-            <CardTitle>WTO 股价</CardTitle>
+            <CardTitle>FXHO 股价</CardTitle>
             {updatedAt && (
               <p className="text-xs text-white/40">
                 上次更新：{new Date(updatedAt * 1000).toLocaleString("zh-CN")}

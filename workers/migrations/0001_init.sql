@@ -369,7 +369,7 @@ CREATE INDEX IF NOT EXISTS idx_claim_user ON claim_signatures(user, used_at);
 -- 默认后台配置
 INSERT OR IGNORE INTO admin_config (key, value, updated_by, updated_at) VALUES
   ('stock_price_usdt', '1', 'init', strftime('%s','now')),
-  ('stock_symbol', 'WTO', 'init', strftime('%s','now')),
+  ('stock_symbol', 'FXHO', 'init', strftime('%s','now')),
   ('stock_price_provider', 'manual', 'init', strftime('%s','now')),
   ('stock_quote_mode', 'auto', 'init', strftime('%s','now')),
   ('stock_volume_min_usdt', '100000', 'init', strftime('%s','now')),

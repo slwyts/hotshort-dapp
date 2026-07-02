@@ -278,7 +278,7 @@ admin.get("/stock-price", async (c) => {
   return c.json(withStockMarketStatus(quote, market));
 });
 
-/** POST /admin/stock-trade  WTO 股票市场自动/手动休市控制 */
+/** POST /admin/stock-trade  FXHO 股票市场自动/手动休市控制 */
 admin.post("/stock-trade", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
@@ -308,7 +308,7 @@ admin.post("/stock-trade", async (c) => {
   });
 });
 
-/** POST /admin/stock-price  WTO 股价手动兜底设值 */
+/** POST /admin/stock-price  FXHO 股价手动兜底设值 */
 admin.post("/stock-price", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
@@ -337,7 +337,7 @@ admin.post("/stock-price/mode", async (c) => {
   return c.json(withStockMarketStatus(quote, market));
 });
 
-/** POST /admin/stock-price/sync  立即从 Yahoo Finance 同步 WTO 股价 */
+/** POST /admin/stock-price/sync  立即从 Yahoo Finance 同步 FXHO 股价 */
 admin.post("/stock-price/sync", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
@@ -678,7 +678,7 @@ const RESET_TABLES = [
 async function seedDefaults(env: Env, at: number): Promise<void> {
   const rows: [string, string][] = [
     ["stock_price_usdt", "1"],
-    ["stock_symbol", "WTO"],
+    ["stock_symbol", "FXHO"],
     ["stock_price_provider", "manual"],
     ["stock_quote_mode", "auto"],
     ["stock_market_mode", "auto"],

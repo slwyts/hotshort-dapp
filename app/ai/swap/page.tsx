@@ -19,7 +19,7 @@ import { ERC20_ABI, VAULT_ABI } from "@/lib/contracts/abis";
 import { DEPOSIT_PURPOSE } from "@/lib/contracts/addresses";
 import { useContracts } from "@/lib/runtime-config";
 import { formatNumber } from "@/lib/utils";
-import { WTO_TRADE_FEE_BPS, BPS_DENOMINATOR } from "@/lib/constants/business-rules";
+import { STOCK_TRADE_FEE_BPS, BPS_DENOMINATOR } from "@/lib/constants/business-rules";
 
 export default function SwapPage() {
   const { address, isConnected } = useAccount();
@@ -57,8 +57,8 @@ export default function SwapPage() {
 
   const stockOutGross =
     hsPrice && stockPrice && stockPrice > 0 ? (Number(hs) * hsPrice) / stockPrice : 0;
-  const feePercent = WTO_TRADE_FEE_BPS / 100;
-  const stockFee = (stockOutGross * WTO_TRADE_FEE_BPS) / BPS_DENOMINATOR;
+  const feePercent = STOCK_TRADE_FEE_BPS / 100;
+  const stockFee = (stockOutGross * STOCK_TRADE_FEE_BPS) / BPS_DENOMINATOR;
   const stockOut = stockOutGross - stockFee;
 
   const submit = async () => {

@@ -30,7 +30,7 @@ import {
   AI_AIRDROP_MIN_HS_USDT,
   type AiTierKey,
   BPS_DENOMINATOR,
-  WTO_TRADE_FEE_BPS,
+  STOCK_TRADE_FEE_BPS,
 } from "@/lib/constants/business-rules";
 
 export const ai = new Hono<{ Bindings: Env }>();
@@ -54,7 +54,7 @@ function quoteStockSale(stockWei: bigint, stockPriceUsdt: number, hsPriceUsdt: n
   const usdtOut = (stockWei * stockPriceWei) / WEI_SCALE;
   const hsOutGross = (usdtOut * WEI_SCALE) / hsPriceWei;
   // 卖出 3% 手续费：扣减到账 HS，手续费部分不签发（留存 Vault）。
-  const hsFee = (hsOutGross * BigInt(WTO_TRADE_FEE_BPS)) / BigInt(BPS_DENOMINATOR);
+  const hsFee = (hsOutGross * BigInt(STOCK_TRADE_FEE_BPS)) / BigInt(BPS_DENOMINATOR);
   const hsOut = hsOutGross - hsFee;
   return { usdtOut, hsOutGross, hsFee, hsOut };
 }
@@ -226,7 +226,7 @@ ai.post("/swap", async (c) => {
   const ratioScaled = BigInt(Math.floor((hsPrice / stockPrice) * 1e18));
   const stockOutGross = (hsWei * ratioScaled) / SCALE;
   // 买入 3% 手续费：扣减到账股票，手续费部分不发放（留存 Vault）。
-  const stockFee = (stockOutGross * BigInt(WTO_TRADE_FEE_BPS)) / BigInt(BPS_DENOMINATOR);
+  const stockFee = (stockOutGross * BigInt(STOCK_TRADE_FEE_BPS)) / BigInt(BPS_DENOMINATOR);
   const stockOut = stockOutGross - stockFee;
 
   const id = ulid();
@@ -241,10 +241,10 @@ ai.post("/swap", async (c) => {
 
   await addStock(c.env, user, stockOut, false);
 
-  return c.json({ id, stockOut: stockOut.toString(), stockFee: stockFee.toString(), feeBps: WTO_TRADE_FEE_BPS, stockLocked: "0", unlocksAt: null });
+  return c.json({ id, stockOut: stockOut.toString(), stockFee: stockFee.toString(), feeBps: STOCK_TRADE_FEE_BPS, stockLocked: "0", unlocksAt: null });
 });
 
-/** GET /ai/sell/quote  查询可卖 WTO 与按当前行情估算的 HS 到账。 */
+/** GET /ai/sell/quote  查询可卖 FXHO 与按当前行情估算的 HS 到账。 */
 ai.get("/sell/quote", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
@@ -273,7 +273,7 @@ ai.get("/sell/quote", async (c) => {
     usdtOut: usdtOut.toString(),
     hsOut: hsOut.toString(),
     hsFee: hsFee.toString(),
-    feeBps: WTO_TRADE_FEE_BPS,
+    feeBps: STOCK_TRADE_FEE_BPS,
     enough: (stockAmount ?? 0n) <= holdings.available,
     tradePaused: market.closed,
     marketClosed: market.closed,
@@ -285,7 +285,7 @@ ai.get("/sell/quote", async (c) => {
   });
 });
 
-/** POST /ai/sell  卖出可用 WTO，按成交时行情签发 HS 领取。 */
+/** POST /ai/sell  卖出可用 FXHO，按成交时行情签发 HS 领取。 */
 ai.post("/sell", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
@@ -329,7 +329,7 @@ ai.post("/sell", async (c) => {
     usdtOut: usdtOut.toString(),
     hsOut: hsOut.toString(),
     hsFee: hsFee.toString(),
-    feeBps: WTO_TRADE_FEE_BPS,
+    feeBps: STOCK_TRADE_FEE_BPS,
     stockPriceUsdt,
     hsPriceUsdt,
     holdings: {

@@ -288,7 +288,7 @@ export function TeamSection() {
               icon={Sparkles}
               label={t("me.team.pendingStockReward")}
               value={pendingStockRewards}
-              unit="WTO"
+              unit="FXHO"
               color="purple"
               active={hasPendingStockRewards}
               buttonLabel={t("me.team.claimStockReward")}

@@ -16,7 +16,7 @@ import { api, endpoints } from "@/lib/api";
 import { VAULT_ABI } from "@/lib/contracts/abis";
 import { useContracts } from "@/lib/runtime-config";
 import { formatNumber, cn } from "@/lib/utils";
-import { WTO_TRADE_FEE_BPS, BPS_DENOMINATOR } from "@/lib/constants/business-rules";
+import { STOCK_TRADE_FEE_BPS, BPS_DENOMINATOR } from "@/lib/constants/business-rules";
 
 interface SellQuote {
   holdings: {
@@ -96,12 +96,12 @@ export default function AiSellPage() {
   const locked = quote ? weiToNumber(quote.holdings.lockedStock) : 0;
   const total = quote ? weiToNumber(quote.holdings.totalStock) : 0;
   const amountNum = Number(stockAmount);
-  const feePercent = WTO_TRADE_FEE_BPS / 100;
+  const feePercent = STOCK_TRADE_FEE_BPS / 100;
   const estimatedHsGross = useMemo(() => {
     if (!quote || !Number.isFinite(amountNum) || amountNum <= 0 || quote.hsPriceUsdt <= 0) return 0;
     return (amountNum * quote.stockPriceUsdt) / quote.hsPriceUsdt;
   }, [amountNum, quote]);
-  const estimatedHsFee = (estimatedHsGross * WTO_TRADE_FEE_BPS) / BPS_DENOMINATOR;
+  const estimatedHsFee = (estimatedHsGross * STOCK_TRADE_FEE_BPS) / BPS_DENOMINATOR;
   const estimatedHs = estimatedHsGross - estimatedHsFee;
   const estimatedUsdt = quote && Number.isFinite(amountNum) && amountNum > 0 ? amountNum * quote.stockPriceUsdt : 0;
   const insufficient = Number.isFinite(amountNum) && amountNum > available;
@@ -200,9 +200,9 @@ export default function AiSellPage() {
           ) : (
             <>
               <div className="grid grid-cols-3 gap-1.5 text-center">
-                <Stat label={t("ai.sell.total")} value={formatNumber(total, 2)} unit="WTO" />
-                <Stat label={t("ai.sell.available")} value={formatNumber(available, 2)} unit="WTO" accent />
-                <Stat label={t("ai.sell.locked")} value={formatNumber(locked, 2)} unit="WTO" subtle />
+                <Stat label={t("ai.sell.total")} value={formatNumber(total, 2)} unit="FXHO" />
+                <Stat label={t("ai.sell.available")} value={formatNumber(available, 2)} unit="FXHO" accent />
+                <Stat label={t("ai.sell.locked")} value={formatNumber(locked, 2)} unit="FXHO" subtle />
               </div>
 
               <div>

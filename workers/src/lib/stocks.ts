@@ -361,7 +361,7 @@ export async function getStockQuote(env: Env, options: { refresh?: boolean } = {
   return quoteFromConfig(config);
 }
 
-/** 当前股价（USDT），生产优先真实 WTO 行情，失败回退后台手动价 */
+/** 当前股价（USDT），生产优先真实 FXHO 行情，失败回退后台手动价 */
 export async function getStockPriceUsdt(env: Env): Promise<number> {
   return (await getStockQuote(env)).priceUsdt;
 }

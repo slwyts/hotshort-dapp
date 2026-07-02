@@ -278,7 +278,7 @@ export default function AiPage() {
         <CardContent className="flex items-center justify-between gap-3 py-4">
           <div>
             <div className="text-sm font-bold">套餐订单</div>
-            <div className="mt-0.5 text-xs text-white/45">查看 WTO 股票释放进度和交易详情</div>
+            <div className="mt-0.5 text-xs text-white/45">查看 FXHO 股票释放进度和交易详情</div>
           </div>
           <Link href="/me?tab=orders&type=ai">
             <Button size="sm" variant="outline">查看订单</Button>

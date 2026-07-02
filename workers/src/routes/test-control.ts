@@ -58,7 +58,7 @@ async function seedDefaults(env: Env, at: number): Promise<void> {
   const rows: [string, string][] = [
     ["owner_addresses", OWNER],
     ["stock_price_usdt", "1"],
-    ["stock_symbol", "WTO"],
+    ["stock_symbol", "FXHO"],
     ["stock_price_provider", "manual"],
     ["stock_quote_mode", "manual"],
     ["stock_market_mode", "manual"],

@@ -221,37 +221,37 @@ export default function DividendPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-2">
-            <Stat label={t("ai.div.holding")} value={formatNumber(totalStock, 2)} unit="WTO" suffix={`≈ $${formatNumber(totalStock * stockPrice, 2)}`} />
+            <Stat label={t("ai.div.holding")} value={formatNumber(totalStock, 2)} unit="FXHO" suffix={`≈ $${formatNumber(totalStock * stockPrice, 2)}`} />
             <Stat label={t("ai.div.locked")} value={formatNumber(lockedStock, 2)} unit={t("ai.div.unit")} subtle />
             <Stat
               label={t("ai.div.todayShare")}
               value={formatNumber(todayShare, 2)}
-              unit="WTO"
+              unit="FXHO"
               accent
               suffix={`${data.dividend.claimed ? t("ai.div.claimed") : ""} ≈ $${formatNumber(todayShare * stockPrice, 2)}`}
             />
             <Stat
               label={t("ai.div.teamReward")}
               value={formatNumber(teamClaimableStock, 2)}
-              unit="WTO"
+              unit="FXHO"
               suffix={`≈ $${formatNumber(teamClaimableStock * stockPrice, 2)}`}
             />
             <Stat
               label={t("ai.div.personalPending")}
               value={formatNumber(personalClaimableStock, 2)}
-              unit="WTO"
+              unit="FXHO"
               suffix={`≈ $${formatNumber(personalClaimableStock * stockPrice, 2)}`}
             />
             <Stat
               label={t("ai.div.pending")}
               value={formatNumber(totalClaimableStock, 2)}
-              unit="WTO"
+              unit="FXHO"
               suffix={`${otherClaimableStock > 0 ? t("ai.div.otherIncluded", { amount: formatNumber(otherClaimableStock, 2) }) : ""} ≈ $${formatNumber(totalClaimableStock * stockPrice, 2)}`}
             />
           </div>
 
           <div className="rounded-md border border-white/5 bg-black/30 px-3 py-2 text-[11px] text-white/45">
-            WTO 价格：${formatNumber(stockPrice, 4)} · {data.stock?.source ?? "manual"}{data.stock?.fallback ? " 兜底价" : ""}
+            FXHO 价格：${formatNumber(stockPrice, 4)} · {data.stock?.source ?? "manual"}{data.stock?.fallback ? " 兜底价" : ""}
           </div>
 
           {marketClosed && (

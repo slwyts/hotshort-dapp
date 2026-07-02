@@ -37,8 +37,8 @@ export const STAKE_BURN_DIVIDEND_BPS = 500;
 export const STAKE_BURN_DIVIDEND_MIN_HS_USDT = 10;
 
 // ===== §2.1 AI 量化套餐 =====
-export const STOCK_SYMBOL = "WTO";
-export const STOCK_DISPLAY_NAME = "WTO";
+export const STOCK_SYMBOL = "FXHO";
+export const STOCK_DISPLAY_NAME = "FXHO";
 export const STOCK_QUOTE_PROVIDER = "Yahoo Finance";
 
 export const AI_TIERS = [
@@ -115,12 +115,12 @@ export const AI_3GEN_DOWNGRADE_BPS = 5000; // 50%
 export const AI_SWAP_LOCK_SECONDS = 0;
 
 /**
- * WTO 股票买入/卖出手续费（bps）。
- *   - 买入（HS → WTO 闪兑）：扣减得到的股票数量。
- *   - 卖出（WTO → HS）：扣减到账的 HS 数量。
+ * FXHO 股票买入/卖出手续费（bps）。
+ *   - 买入（HS → FXHO 闪兑）：扣减得到的股票数量。
+ *   - 卖出（FXHO → HS）：扣减到账的 HS 数量。
  * 手续费部分不签发给用户，等同于留存在 Vault 合约内。
  */
-export const WTO_TRADE_FEE_BPS = 300; // 3%
+export const STOCK_TRADE_FEE_BPS = 300; // 3%
 
 // ===== §3 彩票（薄饼克隆） =====
 /** 每期奖池补给（HS），期次跟随 PancakeSwap LotteryV2 */

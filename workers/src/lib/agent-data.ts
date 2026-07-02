@@ -412,7 +412,7 @@ async function listInternalUserTransactions(
       usdtWei: parseWei(row.usdt_in),
       occurredAt: row.created_at,
       sourceRef: row.source_tx_hash,
-      extra: { tier: row.tier, stockGranted: tokenAmountLabel("WTO", row.stock_granted) },
+      extra: { tier: row.tier, stockGranted: tokenAmountLabel("FXHO", row.stock_granted) },
     });
   }
 
@@ -497,7 +497,7 @@ async function listInternalUserTransactions(
       usdtWei: await hsWeiToUsdtWei(env, parseWei(row.hs_in)),
       occurredAt: row.swapped_at,
       sourceRef: row.source_tx_hash,
-      extra: { stockOut: tokenAmountLabel("WTO", row.stock_out) },
+      extra: { stockOut: tokenAmountLabel("FXHO", row.stock_out) },
     });
   }
 
@@ -533,8 +533,8 @@ async function listInternalUserTransactions(
       type: "stock_dividend",
       label: "股票分红入账",
       direction: "credit",
-      token: "WTO",
-      amount: tokenAmountLabel("WTO", row.stock_share),
+      token: "FXHO",
+      amount: tokenAmountLabel("FXHO", row.stock_share),
       usdtValue: "0",
       usdtWei: await stockWeiToUsdtWei(env, parseWei(row.stock_share)),
       occurredAt: Date.parse(`${row.date}T00:00:00Z`) / 1000 || 0,

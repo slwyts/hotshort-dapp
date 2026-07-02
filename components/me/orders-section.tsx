@@ -515,7 +515,7 @@ function AiOrders({ orders, expanded, setExpanded, stockPrice }: {
               <button type="button" onClick={() => setExpanded(open ? null : order.id)} className="flex w-full items-center justify-between gap-3 text-left">
                 <div>
                   <div className="font-bold">{order.tier.toUpperCase()} 套餐</div>
-                  <div className="mt-1 text-[11px] text-white/45">{dateText(order.created_at)} · WTO {formatNumber(stock, 2)} 股</div>
+                  <div className="mt-1 text-[11px] text-white/45">{dateText(order.created_at)} · FXHO {formatNumber(stock, 2)} 股</div>
                 </div>
                 <div className="flex items-center gap-2 text-right">
                   <div>
@@ -529,7 +529,7 @@ function AiOrders({ orders, expanded, setExpanded, stockPrice }: {
                 <div className="mt-3 space-y-3 border-t border-white/5 pt-3">
                   <div className="grid grid-cols-2 gap-2">
                     <DetailRow label="投入" value={`${formatNumber(weiToNumber(order.usdt_in), 2)} USDT`} />
-                    <DetailRow label="WTO 股价" value={`$${formatNumber(stockPrice, 4)}`} />
+                    <DetailRow label="FXHO 股价" value={`$${formatNumber(stockPrice, 4)}`} />
                     <DetailRow label="已释放" value={`${formatNumber(released, 2)} 股`} />
                     <DetailRow label="锁定中" value={`${formatNumber(locked, 2)} 股`} />
                     <DetailRow label="下次释放" value={order.next_unlocks_at ? dateText(order.next_unlocks_at) : "已全部释放"} />

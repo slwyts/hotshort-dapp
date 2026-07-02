@@ -235,18 +235,18 @@ for f in migrations/[0-9][0-9][0-9][0-9]_*.sql; do
   "${WRANGLER_CMD[@]}" d1 execute hotshort --local --file "$f" 2>/dev/null || true
 done
 
-echo "📈 Seeding WTO quote..."
-WTO_QUOTE_CSV=$(curl -fsSL --max-time 8 'https://stooq.com/q/l/?s=wto.us&f=sd2t2ohlcv&h&e=csv' 2>/dev/null || true)
-WTO_PRICE=$(printf '%s\n' "$WTO_QUOTE_CSV" | awk -F, 'NR==2 {print $7}')
-if [[ "$WTO_PRICE" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+echo "📈 Seeding FXHO quote..."
+STOCK_QUOTE_CSV=$(curl -fsSL --max-time 8 'https://stooq.com/q/l/?s=fxho.us&f=sd2t2ohlcv&h&e=csv' 2>/dev/null || true)
+STOCK_PRICE=$(printf '%s\n' "$STOCK_QUOTE_CSV" | awk -F, 'NR==2 {print $7}')
+if [[ "$STOCK_PRICE" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
   NOW_TS=$(date +%s)
   "${WRANGLER_CMD[@]}" d1 execute hotshort --local --command \
-    "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('stock_price_usdt', '$WTO_PRICE', 'dev-local', $NOW_TS)" 2>/dev/null || true
+    "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('stock_price_usdt', '$STOCK_PRICE', 'dev-local', $NOW_TS)" 2>/dev/null || true
   "${WRANGLER_CMD[@]}" d1 execute hotshort --local --command \
     "INSERT OR REPLACE INTO admin_config (key, value, updated_by, updated_at) VALUES ('stock_price_provider', 'Stooq', 'dev-local', $NOW_TS)" 2>/dev/null || true
-  echo "✅ WTO quote seeded from Stooq: $WTO_PRICE USDT"
+  echo "✅ FXHO quote seeded from Stooq: $STOCK_PRICE USDT"
 else
-  echo "⚠️  WTO quote seed skipped; using DB fallback price"
+  echo "⚠️  FXHO quote seed skipped; using DB fallback price"
 fi
 
 # 插入 owner 地址到 admin_config
