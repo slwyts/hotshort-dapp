@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, Save, BarChart3, ChevronLeft } from "lucide-react";
 import Swal from "sweetalert2";
@@ -109,10 +109,12 @@ export default function AdminAiConfigPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
+    const token = jwt ?? (await signIn());
+    if (!token) return;
     setLoading(true);
     try {
-      const r = await api.get<AiCfg>(endpoints.adminAiConfig);
+      const r = await api.get<AiCfg>(endpoints.adminAiConfig, token);
       const nextCfg = { ...r, directReferralBps: { ...defaultDirectReferralBps(), ...(r.directReferralBps ?? {}) } };
       setDraft(configToDraft(nextCfg));
     } catch {
@@ -120,11 +122,11 @@ export default function AdminAiConfigPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [jwt, signIn]);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
 
   const save = async () => {
     const token = jwt ?? (await signIn());
