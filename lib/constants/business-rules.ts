@@ -133,7 +133,7 @@ export const LOTTERY_TO_BURN_BPS = 3000;
 
 /** 命中前 N 位 → 占当期奖池比例（bps）。与 PancakeSwap LotteryV2 一致：左起连续前缀匹配，断点即止。 */
 export const LOTTERY_PRIZE_BPS = {
-  hit1: 200,    // 2%
+  hit1: 100,    // 1%
   hit2: 300,    // 3%
   hit3: 500,    // 5%
   hit4Prefix: 1500,  // 15%

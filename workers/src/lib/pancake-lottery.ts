@@ -66,8 +66,10 @@ export async function getPancakeLotteryAddress(env: Env): Promise<Address | null
 
 export function winningFromFinalNumber(finalNumber: bigint): string | null {
   if (finalNumber < 1_000_000n) return null;
-  const winning = (finalNumber % 1_000_000n).toString().padStart(6, "0");
-  return /^\d{6}$/.test(winning) ? winning : null;
+  const digits = (finalNumber % 1_000_000n).toString().padStart(6, "0");
+  if (!/^\d{6}$/.test(digits)) return null;
+  // 链上 finalNumber 低位数字对应用户选号的第 1 位，薄饼官网展示时做了倒序；这里保持与官网一致
+  return digits.split("").reverse().join("");
 }
 
 export async function readPancakeCurrentLotteryId(env: Env): Promise<number | null> {
