@@ -30,26 +30,52 @@ const ASSET_LABELS: Record<string, string> = {
   LP: "LP 流动性",
 };
 
+function normalizePercentInput(value: string) {
+  const cleaned = value.replace(/[^\d.]/g, "");
+  const dotIndex = cleaned.indexOf(".");
+  const integerPart = dotIndex === -1 ? cleaned : cleaned.slice(0, dotIndex);
+  const decimalPart = dotIndex === -1 ? "" : cleaned.slice(dotIndex + 1).replace(/\./g, "").slice(0, 2);
+  const integer = integerPart.replace(/^0+(?=\d)/, "");
+
+  if (dotIndex !== -1) return `${integer || "0"}.${decimalPart}`;
+  return integer;
+}
+
+function formatPercentFromBps(bps: number) {
+  return (bps / 100).toFixed(2);
+}
+
+function parsePercentDraft(value: string) {
+  if (!/^\d+(?:\.\d{0,2})?$/.test(value)) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed * 100);
+}
+
 export default function AdminRatesPage() {
   const { jwt, signIn } = useSiweJwt();
-  const [rates, setRates] = useState<Record<string, number>>({});
+  const [draft, setDraft] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const r = await api.get<{ rates: RateRow[] }>(endpoints.stakeRates);
       const map: Record<string, number> = {};
       for (const a of STAKE_ASSETS) {
         for (const m of STAKE_LOCK_MONTHS) {
           map[`${a}:${m}`] = STAKE_DEFAULT_RATES_BPS[a][m];
         }
       }
-      for (const row of r.rates ?? []) {
-        map[`${row.asset}:${row.lock_months}`] = row.monthly_rate_bps;
+      try {
+        const r = await api.get<{ rates: RateRow[] }>(endpoints.stakeRates);
+        for (const row of r.rates ?? []) {
+          map[`${row.asset}:${row.lock_months}`] = row.monthly_rate_bps;
+        }
+      } catch {
+        /* 接口失败时展示默认值 */
       }
-      setRates(map);
+      setDraft(Object.fromEntries(Object.entries(map).map(([k, bps]) => [k, formatPercentFromBps(bps)])));
     } finally {
       setLoading(false);
     }
@@ -60,26 +86,42 @@ export default function AdminRatesPage() {
   }, []);
 
   const update = (a: StakeAsset, m: StakeLockMonths, v: string) => {
-    const percent = Number(v);
-    if (!Number.isFinite(percent) || percent < 0) return;
-    setRates((prev) => ({ ...prev, [`${a}:${m}`]: Math.round(percent * 100) }));
+    setDraft((prev) => ({ ...prev, [`${a}:${m}`]: normalizePercentInput(v) }));
+  };
+
+  const canonicalize = (a: StakeAsset, m: StakeLockMonths) => {
+    const bps = parsePercentDraft(draft[`${a}:${m}`] ?? "");
+    if (bps !== null) {
+      setDraft((prev) => ({ ...prev, [`${a}:${m}`]: formatPercentFromBps(bps) }));
+    }
   };
 
   const save = async () => {
+    const rates: { asset: StakeAsset; lock_months: StakeLockMonths; monthly_rate_bps: number }[] = [];
+    for (const a of STAKE_ASSETS) {
+      for (const m of STAKE_LOCK_MONTHS) {
+        const bps = parsePercentDraft(draft[`${a}:${m}`] ?? "");
+        if (bps === null || bps > 100_000) {
+          await Swal.fire({
+            icon: "warning",
+            title: "参数无效",
+            text: `请检查 ${ASSET_LABELS[a] ?? a} ${m} 个月的利率`,
+            background: "#141419",
+            color: "#fff",
+            confirmButtonColor: "#b829ff",
+          });
+          return;
+        }
+        rates.push({ asset: a, lock_months: m, monthly_rate_bps: bps });
+      }
+    }
+
     const token = jwt ?? (await signIn());
     if (!token) return;
     setSaving(true);
     try {
-      const payload = {
-        rates: STAKE_ASSETS.flatMap((a) =>
-          STAKE_LOCK_MONTHS.map((m) => ({
-            asset: a,
-            lock_months: m,
-            monthly_rate_bps: rates[`${a}:${m}`] ?? STAKE_DEFAULT_RATES_BPS[a][m],
-          })),
-        ),
-      };
-      await api.post(endpoints.adminRates, payload, token);
+      await api.post(endpoints.adminRates, { rates }, token);
+      setDraft(Object.fromEntries(rates.map((r) => [`${r.asset}:${r.lock_months}`, formatPercentFromBps(r.monthly_rate_bps)])));
       await Swal.fire({
         icon: "success",
         title: "保存成功",
@@ -133,11 +175,11 @@ export default function AdminRatesPage() {
                           <label className="text-xs text-white/50">{m} 个月</label>
                           <div className="mt-1 flex items-center gap-2">
                             <Input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={((rates[`${a}:${m}`] ?? 0) / 100).toFixed(2)}
+                              type="text"
+                              inputMode="decimal"
+                              value={draft[`${a}:${m}`] ?? ""}
                               onChange={(e) => update(a, m, e.target.value)}
+                              onBlur={() => canonicalize(a, m)}
                             />
                             <span className="text-sm text-white/40">%</span>
                           </div>

@@ -7,6 +7,7 @@ import { syncPancakeLotteryCycle } from "./lib/lottery-draw";
 import { settleBurnRound } from "./lib/burn-settle";
 import { distributeLpDividend } from "./lib/lp-dividend";
 import { distributeBurnRealtime } from "./lib/burn-realtime";
+import { settleBlackhole } from "./lib/blackhole";
 import { nowSeconds } from "./lib/time";
 
 /**
@@ -15,7 +16,7 @@ import { nowSeconds } from "./lib/time";
  * 不再依赖 CF 多条 cron 表达式与字符串匹配。
  *
  * 任务节奏：
- *   - 每分钟：Vault 事件索引 + LP 分红检查 + Pancake 彩票周期同步
+ *   - 每分钟：Vault 事件索引 + LP 分红检查 + Pancake 彩票周期同步 + 黑洞欠烧结转（内部 15 分钟节流）
  *   - 每 15 分钟：FXHO 股价同步
  *   - 每日 UTC 00:00（北京 08:00）：AI 股票释放 + 股票分红结算
  *   - 每周日 UTC 16:00（北京周一 00:00）：燃烧周榜结算
@@ -96,6 +97,14 @@ export async function runCron(_event: ScheduledEvent, env: Env): Promise<void> {
     if (d.processed > 0) console.log(`[cron] burn-realtime ${d.processed} records`);
   } catch (e) {
     console.error(`[cron] burn-realtime error`, (e as Error).message);
+  }
+
+  // 每分钟：黑洞欠烧结转（彩票门票 30% + 燃烧 50% → 0x…dEaD），内部 15 分钟节流 + nonce 幂等
+  try {
+    const bh = await settleBlackhole(env);
+    if (bh.action !== "idle") console.log(`[cron] blackhole`, bh);
+  } catch (e) {
+    console.error(`[cron] blackhole error`, (e as Error).message);
   }
 
   // 每分钟：LP 分红检查（内部有阈值保护，不够门槛自动跳过）

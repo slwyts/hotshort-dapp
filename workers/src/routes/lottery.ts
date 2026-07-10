@@ -128,7 +128,7 @@ lottery.get("/round", async (c) => {
  * POST /lottery/buy  用户已链上 deposit(purpose=3) 后通知 Worker 入账
  * 入参: { sourceTxHash, entries: ['123456', '654321'] }
  * 兼容旧入参: { sourceTxHash, numbers: '123456', count?: 1 }，表示多张同号。
- *   - 70% 入奖池 / 30% 黑洞由 cron 在结算时根据 deposit 总量切；这里只入门票流水
+ *   - 70% 入奖池；30% 黑洞由 cron 的 settleBlackhole 定期链上转入 0x…dEaD（见 lib/blackhole.ts）
  */
 lottery.post("/buy", async (c) => {
   const user = await requireUser(c);
@@ -185,7 +185,7 @@ lottery.post("/buy", async (c) => {
     ticketIds.push(id);
   }
 
-  // 累计 70% 入奖池；剩余 30% 留在 Vault 作为黑洞/金库待处理余额。
+  // 累计 70% 入奖池；剩余 30% 由 cron 的 settleBlackhole 定期从 Vault 链上转入黑洞地址。
   const toPool = (paidWei * BigInt(LOTTERY_TO_POOL_BPS)) / BigInt(BPS_DENOMINATOR);
   const poolRow = await c.env.DB.prepare("SELECT pool_hs FROM lottery_rounds WHERE round_no = ?")
     .bind(round.roundNo)
