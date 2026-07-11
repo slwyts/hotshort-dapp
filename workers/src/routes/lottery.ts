@@ -10,7 +10,7 @@ import { createClaimSignature, getExistingSignature } from "../lib/claims";
 import { deterministicNonce } from "../lib/nonce";
 import { decimalToWei, usdtWeiToHsWei } from "../lib/pricing";
 import { readVaultNonceUsed, verifyVaultDeposit, verifyVaultClaim } from "../lib/vault-events";
-import { syncPancakeLotteryCycle } from "../lib/lottery-draw";
+import { refillPoolWei, syncPancakeLotteryCycle } from "../lib/lottery-draw";
 import { getPancakeLotteryAddress, PANCAKE_LOTTERY_STATUS, readPancakeLottery } from "../lib/pancake-lottery";
 import { LOTTERY_TO_POOL_BPS, BPS_DENOMINATOR } from "@/lib/constants/business-rules";
 
@@ -53,10 +53,21 @@ async function getOrCreateRound(env: Env): Promise<{
     };
   }
 
-  const refill = await env.DB.prepare(
-    "SELECT value FROM admin_config WHERE key = 'lottery_weekly_refill_hs'",
-  ).first<{ value: string }>();
-  const refillHsWei = BigInt(Math.floor(Number(refill?.value ?? 100_000) * 1e18));
+  // 兜底建期：奖池从最近一期结转（扣除该期已派奖金），无历史时才用补充值（README §3.1 跨期累计）。
+  let poolWei: bigint | null = null;
+  const prev = await env.DB.prepare(
+    "SELECT round_no, pool_hs FROM lottery_rounds ORDER BY round_no DESC LIMIT 1",
+  ).first<{ round_no: number; pool_hs: string }>();
+  if (prev) {
+    const prizes = await env.DB.prepare(
+      "SELECT prize_hs FROM lottery_tickets WHERE round_no = ? AND prize_hs IS NOT NULL",
+    ).bind(prev.round_no).all<{ prize_hs: string }>();
+    let paidWei = 0n;
+    for (const p of prizes.results ?? []) paidWei += BigInt(p.prize_hs);
+    poolWei = BigInt(prev.pool_hs) - paidWei;
+    if (poolWei < 0n) poolWei = 0n;
+  }
+  if (poolWei === null) poolWei = await refillPoolWei(env);
 
   const ticketUsdt = await getTicketPriceUsdt(env);
   const ticketHsWei = await usdtWeiToHsWei(env, decimalToWei(ticketUsdt));
@@ -65,9 +76,9 @@ async function getOrCreateRound(env: Env): Promise<{
   await env.DB.prepare(
     "INSERT INTO lottery_rounds (round_no, ticket_price_hs, pool_hs, opened_at) VALUES (?, ?, ?, ?)",
   )
-    .bind(roundNo, ticketHsWei.toString(), refillHsWei.toString(), now)
+    .bind(roundNo, ticketHsWei.toString(), poolWei.toString(), now)
     .run();
-  return { roundNo, pool_hs: refillHsWei.toString(), ticket_price_hs: ticketHsWei.toString(), opened_at: now, pancake_lottery_id: null };
+  return { roundNo, pool_hs: poolWei.toString(), ticket_price_hs: ticketHsWei.toString(), opened_at: now, pancake_lottery_id: null };
 }
 
 async function ensurePancakeRoundOpen(env: Env, round: { pancake_lottery_id: string | null }): Promise<{ ok: true } | { ok: false; error: string; status: number }> {

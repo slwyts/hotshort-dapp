@@ -38,6 +38,17 @@ export function prizeFromPool(poolHs: bigint, bps: number): bigint {
   return (poolHs * BigInt(bps)) / BigInt(BPS_DENOMINATOR);
 }
 
+/**
+ * 后台配置的数量字符串 → wei。纯 BigInt 运算：
+ * 之前用 Number*1e18 转换，1000000 会变成 999999999999999983222784（浮点精度）。
+ */
+export function configAmountToWei(raw: string | null | undefined, fallback: number): bigint {
+  const text = (raw ?? String(fallback)).trim();
+  const m = /^(\d+)(?:\.(\d{1,18}))?$/.exec(text);
+  if (!m) return BigInt(fallback) * 10n ** 18n;
+  return BigInt(m[1]) * 10n ** 18n + BigInt((m[2] ?? "").padEnd(18, "0"));
+}
+
 export function bytesToDigits6(bytes: ArrayBuffer | Uint8Array): string {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   let n = 0n;

@@ -3,7 +3,7 @@ import { syncVaultEvents } from "./lib/indexer";
 import { settleAiDividend } from "./lib/dividend";
 import { releaseDueAiStock } from "./lib/ai-releases";
 import { syncStockQuote } from "./lib/stocks";
-import { syncPancakeLotteryCycle } from "./lib/lottery-draw";
+import { syncPancakeLotteryCycle, topUpLotteryPool } from "./lib/lottery-draw";
 import { settleBurnRound } from "./lib/burn-settle";
 import { distributeLpDividend } from "./lib/lp-dividend";
 import { distributeBurnRealtime } from "./lib/burn-realtime";
@@ -19,7 +19,7 @@ import { nowSeconds } from "./lib/time";
  *   - 每分钟：Vault 事件索引 + LP 分红检查 + Pancake 彩票周期同步 + 黑洞欠烧结转（内部 15 分钟节流）
  *   - 每 15 分钟：FXHO 股价同步
  *   - 每日 UTC 00:00（北京 08:00）：AI 股票释放 + 股票分红结算
- *   - 每周日 UTC 16:00（北京周一 00:00）：燃烧周榜结算
+ *   - 每周日 UTC 16:00（北京周一 00:00）：燃烧周榜结算 + 彩票奖池补足
  */
 
 /** 读取某任务上次执行的 bucket 标记 */
@@ -145,13 +145,19 @@ export async function runCron(_event: ScheduledEvent, env: Env): Promise<void> {
     }
   }
 
-  // 每周日 UTC 16:00：燃烧周榜结算
+  // 每周日 UTC 16:00（北京周一 00:00）：燃烧周榜结算 + 彩票奖池低于补充值时补足
   if (await isDue(env, "cron_last_weekly", weeklyBucket(date), now)) {
     try {
       const burn = await settleBurnRound(env);
       console.log(`[cron] burn-settle`, burn);
     } catch (e) {
       console.error(`[cron] weekly error`, (e as Error).message);
+    }
+    try {
+      const topup = await topUpLotteryPool(env);
+      if (topup.toppedUp) console.log(`[cron] lottery-topup round=${topup.roundNo} pool=${topup.poolHs}`);
+    } catch (e) {
+      console.error(`[cron] lottery-topup error`, (e as Error).message);
     }
   }
 }

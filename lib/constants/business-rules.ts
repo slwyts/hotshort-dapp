@@ -123,8 +123,12 @@ export const AI_SWAP_LOCK_SECONDS = 0;
 export const STOCK_TRADE_FEE_BPS = 300; // 3%
 
 // ===== §3 彩票（薄饼克隆） =====
-/** 每期奖池补给（HS），期次跟随 PancakeSwap LotteryV2 */
-export const LOTTERY_WEEKLY_REFILL_HS = 100_000;
+/**
+ * 奖池补充线（HS）— 后台可改（admin_config lottery_weekly_refill_hs）。
+ * 奖池跨期持续累计、派奖后扣除，不随期次重置；
+ * 每周一（北京时间）低于此值时补足到此值。
+ */
+export const LOTTERY_WEEKLY_REFILL_HS = 1_000_000;
 /** 门票价（USDT） — 后台可改 */
 export const LOTTERY_DEFAULT_TICKET_USDT = 1;
 /** 70% 入池 / 30% 黑洞 */

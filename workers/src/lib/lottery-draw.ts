@@ -1,5 +1,6 @@
 import type { Env } from "../env";
-import { computeHit, prizeFromPool } from "./lottery";
+import { LOTTERY_WEEKLY_REFILL_HS } from "@/lib/constants/business-rules";
+import { computeHit, configAmountToWei, prizeFromPool } from "./lottery";
 import { decimalToWei, usdtWeiToHsWei } from "./pricing";
 import {
   PANCAKE_LOTTERY_STATUS,
@@ -19,9 +20,13 @@ async function currentHotshortRound(env: Env): Promise<number> {
   return Number(cur?.value ?? 1);
 }
 
-async function roundDefaults(env: Env): Promise<{ ticketHsWei: bigint; refillHsWei: bigint }> {
+export async function refillPoolWei(env: Env): Promise<bigint> {
   const refill = await env.DB.prepare("SELECT value FROM admin_config WHERE key = 'lottery_weekly_refill_hs'").first<{ value: string }>();
-  const refillHsWei = BigInt(Math.floor(Number(refill?.value ?? 100_000) * 1e18));
+  return configAmountToWei(refill?.value, LOTTERY_WEEKLY_REFILL_HS);
+}
+
+async function roundDefaults(env: Env): Promise<{ ticketHsWei: bigint; refillHsWei: bigint }> {
+  const refillHsWei = await refillPoolWei(env);
   const ticket = await env.DB.prepare("SELECT value FROM admin_config WHERE key = 'lottery_ticket_price_usdt'").first<{ value: string }>();
   const ticketHsWei = await usdtWeiToHsWei(env, decimalToWei(Number(ticket?.value ?? 1)));
   return { ticketHsWei, refillHsWei };
@@ -32,6 +37,7 @@ async function ensureHotshortRound(
   roundNo: number,
   openedAt: number,
   pancakeLotteryId?: number,
+  poolWeiOverride?: bigint,
 ): Promise<void> {
   const existing = await env.DB.prepare("SELECT round_no FROM lottery_rounds WHERE round_no = ?")
     .bind(roundNo)
@@ -48,10 +54,12 @@ async function ensureHotshortRound(
   }
 
   const { ticketHsWei, refillHsWei } = await roundDefaults(env);
+  // 奖池跨期累计（README §3.1）：开新期时由调用方传入结转值；仅首次建期无历史时用补充值。
+  const poolWei = poolWeiOverride ?? refillHsWei;
   await env.DB.prepare(
     "INSERT INTO lottery_rounds (round_no, ticket_price_hs, pool_hs, opened_at, pancake_lottery_id) VALUES (?, ?, ?, ?, ?)",
   )
-    .bind(roundNo, ticketHsWei.toString(), refillHsWei.toString(), openedAt, pancakeLotteryId ? String(pancakeLotteryId) : null)
+    .bind(roundNo, ticketHsWei.toString(), poolWei.toString(), openedAt, pancakeLotteryId ? String(pancakeLotteryId) : null)
     .run();
 }
 
@@ -136,6 +144,7 @@ export async function drawLottery(
   const tickets = await env.DB.prepare("SELECT id, numbers FROM lottery_tickets WHERE round_no = ?").bind(roundNo).all<{ id: string; numbers: string }>();
 
   let settled = 0;
+  let totalPrizesWei = 0n;
   for (const t of tickets.results ?? []) {
     const r = computeHit(t.numbers, winning);
     if (!r.kind) continue;
@@ -145,16 +154,40 @@ export async function drawLottery(
       .bind(r.kind, prize.toString(), t.id)
       .run();
     settled++;
+    totalPrizesWei += prize;
   }
 
-  // 开下一轮
+  // 开下一轮：奖池跨期累计，仅扣除本期派出的奖金，不重置（README §3.1）。
+  // 低于补充值的补足只在每周一（北京）由 cron 的 topUpLotteryPool 执行。
+  // 奖金按每票独立比例发放，理论上总派奖可能超过奖池，钳到 0 防负数。
+  let carryPoolWei = poolWei - totalPrizesWei;
+  if (carryPoolWei < 0n) carryPoolWei = 0n;
   const nextRound = roundNo + 1;
   await env.DB.prepare("UPDATE admin_config SET value = ? WHERE key = 'lottery_current_round'").bind(String(nextRound)).run();
 
   // 下轮先建空映射，随后由 syncPancakeLotteryCycle 绑定到当前 Pancake Open 期。
-  await ensureHotshortRound(env, nextRound, now);
+  await ensureHotshortRound(env, nextRound, now, undefined, carryPoolWei);
 
   return { roundNo, winning, settledTickets: settled };
+}
+
+/**
+ * 每周一 00:00（北京，= 周日 UTC 16:00）由 cron 调用：
+ * 当期奖池低于补充值（后台 lottery_weekly_refill_hs，当前 100 万 HS）时补足到补充值。
+ * 高于补充值则不动 —— 奖池只累计，不重置（README §3.1）。
+ */
+export async function topUpLotteryPool(env: Env): Promise<{ toppedUp: boolean; roundNo: number; poolHs?: string }> {
+  const roundNo = await currentHotshortRound(env);
+  const row = await env.DB.prepare("SELECT pool_hs FROM lottery_rounds WHERE round_no = ? AND drawn_at IS NULL")
+    .bind(roundNo)
+    .first<{ pool_hs: string }>();
+  if (!row) return { toppedUp: false, roundNo };
+  const refill = await refillPoolWei(env);
+  if (BigInt(row.pool_hs) >= refill) return { toppedUp: false, roundNo };
+  await env.DB.prepare("UPDATE lottery_rounds SET pool_hs = ? WHERE round_no = ? AND drawn_at IS NULL")
+    .bind(refill.toString(), roundNo)
+    .run();
+  return { toppedUp: true, roundNo, poolHs: refill.toString() };
 }
 
 export async function syncPancakeLotteryCycle(env: Env): Promise<{
