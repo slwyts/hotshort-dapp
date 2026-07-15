@@ -8,6 +8,7 @@ import { settleBurnRound } from "./lib/burn-settle";
 import { distributeLpDividend } from "./lib/lp-dividend";
 import { distributeBurnRealtime } from "./lib/burn-realtime";
 import { settleBlackhole } from "./lib/blackhole";
+import { pushExpiredStockSalePayouts } from "./lib/stock-sale-push";
 import { nowSeconds } from "./lib/time";
 
 /**
@@ -105,6 +106,14 @@ export async function runCron(_event: ScheduledEvent, env: Env): Promise<void> {
     if (bh.action !== "idle") console.log(`[cron] blackhole`, bh);
   } catch (e) {
     console.error(`[cron] blackhole error`, (e as Error).message);
+  }
+
+  // 每分钟：FXHO 卖出未领自动补发（卖出 60 秒未自领的，由 signer 复用同一 nonce 直接打款给客户）
+  try {
+    const push = await pushExpiredStockSalePayouts(env);
+    if (push.pushed > 0 || push.healed > 0) console.log(`[cron] stock-push`, push);
+  } catch (e) {
+    console.error(`[cron] stock-push error`, (e as Error).message);
   }
 
   // 每分钟：LP 分红检查（内部有阈值保护，不够门槛自动跳过）

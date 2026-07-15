@@ -122,7 +122,8 @@ async function computeOwedWei(env: Env): Promise<bigint> {
   );
 }
 
-async function sendClaimTx(env: Env, sig: ClaimSignatureResponse): Promise<Hex> {
+/** 用 signer 账户直接广播一笔 Vault.claim（黑洞销毁 / 到期未领补发共用） */
+export async function sendClaimTx(env: Env, sig: ClaimSignatureResponse): Promise<Hex> {
   const account = privateKeyToAccount(requireSecret(env, "SIGNER_PRIVATE_KEY") as Hex);
   const chain = defineChain({
     id: Number(env.CHAIN_ID),
