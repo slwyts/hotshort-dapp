@@ -623,17 +623,25 @@ admin.get("/agents", async (c) => {
   return c.json({ agents: rs.results ?? [] });
 });
 
-/** GET /admin/stock-sales  FXHO 卖出记录（含 HS 到账状态；未领的由系统 60 秒内自动补发） */
+/** GET /admin/stock-sales  FXHO 买卖记录（卖出含 HS 到账状态，未领的由系统 60 秒内自动补发；买入为 HS 闪兑即时入账） */
 admin.get("/stock-sales", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
-  const rs = await c.env.DB.prepare(
-    `SELECT id, user, stock_in, hs_out, stock_price_usdt, hs_price_usdt, sold_at, claim_tx_hash, claimed_at
-       FROM stock_sales
-      ORDER BY sold_at DESC
-      LIMIT 200`,
-  ).all();
-  return c.json({ sales: rs.results ?? [] });
+  const [sales, swaps] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT id, user, stock_in, hs_out, stock_price_usdt, hs_price_usdt, sold_at, claim_tx_hash, claimed_at
+         FROM stock_sales
+        ORDER BY sold_at DESC
+        LIMIT 200`,
+    ).all(),
+    c.env.DB.prepare(
+      `SELECT id, user, hs_in, stock_out, hs_price_usdt, stock_price_usdt, swapped_at, source_tx_hash
+         FROM stock_swaps
+        ORDER BY swapped_at DESC
+        LIMIT 200`,
+    ).all(),
+  ]);
+  return c.json({ sales: sales.results ?? [], swaps: swaps.results ?? [] });
 });
 
 // ===== 高级调试 =====
