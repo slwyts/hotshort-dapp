@@ -39,6 +39,13 @@ if [[ -f "$ROOT/.env.production" ]]; then
   cp "$ROOT/.env.production" "$STAGE/.env.production"
 fi
 
+# 裁掉 sharp/libvips 非部署平台（linux-x64 glibc）的二进制，standalone 追踪会把
+# 所有平台变体都打包进来（约 150M 的 darwin/arm64/musl/ppc64/s390x/riscv64 等）。
+if [[ -d "$STAGE/node_modules/.pnpm" ]]; then
+  find "$STAGE/node_modules/.pnpm" -maxdepth 1 -type d \
+    -name '@img+sharp-*' ! -name '*linux-x64*' -exec rm -rf {} +
+fi
+
 cat > "$STAGE/README.deploy.txt" <<'EOF'
 Run:
   NODE_ENV=production PORT=3000 HOSTNAME=127.0.0.1 node server.js
