@@ -623,6 +623,19 @@ admin.get("/agents", async (c) => {
   return c.json({ agents: rs.results ?? [] });
 });
 
+/** GET /admin/stock-sales  FXHO 卖出记录（含 HS 到账状态；未领的由系统 60 秒内自动补发） */
+admin.get("/stock-sales", async (c) => {
+  const owner = await requireOwner(c);
+  if (!owner) return c.json({ error: "forbidden" }, 403);
+  const rs = await c.env.DB.prepare(
+    `SELECT id, user, stock_in, hs_out, stock_price_usdt, hs_price_usdt, sold_at, claim_tx_hash, claimed_at
+       FROM stock_sales
+      ORDER BY sold_at DESC
+      LIMIT 200`,
+  ).all();
+  return c.json({ sales: rs.results ?? [] });
+});
+
 // ===== 高级调试 =====
 
 /** GET /admin/time-debug  当前时间调试信息 */

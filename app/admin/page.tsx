@@ -10,6 +10,7 @@ import {
   Coins,
   BarChart3,
   Wrench,
+  ArrowDownUp,
 } from "lucide-react";
 
 const sections = [
@@ -18,6 +19,7 @@ const sections = [
   { href: "/admin/stock-price", icon: Coins, title: "股价管理", desc: "自动同步与手动兜底价格" },
   { href: "/admin/ai-config", icon: BarChart3, title: "AI 量化", desc: "每日交易模拟与分红池配置" },
   { href: "/admin/agents", icon: Users, title: "代理商", desc: "团队数据与返佣统计" },
+  { href: "/admin/stock-sales", icon: ArrowDownUp, title: "股票卖出", desc: "FXHO 卖出与 HS 到账记录" },
   { href: "/admin/lottery", icon: Ticket, title: "彩票管理", desc: "门票定价与开奖" },
   { href: "/admin/airdrop", icon: Flame, title: "版权空投", desc: "燃烧 HS 价值满 1000U 用户的空投发放管理" },
   { href: "/admin/funds", icon: Wallet, title: "资金与安全", desc: "Vault 余额、暂停、提取" },

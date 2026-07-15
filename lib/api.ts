@@ -100,6 +100,7 @@ export const endpoints = {
   adminAgents: "/admin/agents",
   adminAgentAccounts: "/admin/agent-accounts",
   adminStockPrice: "/admin/stock-price",
+  adminStockSales: "/admin/stock-sales",
   adminStockPriceMode: "/admin/stock-price/mode",
   adminStockPriceSync: "/admin/stock-price/sync",
   adminStockTrade: "/admin/stock-trade",

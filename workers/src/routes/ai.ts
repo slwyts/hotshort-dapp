@@ -18,7 +18,7 @@ import { ulid } from "../lib/ulid";
 import { nowSeconds, todayBeijing } from "../lib/time";
 import { createClaimSignature, getExistingSignature } from "../lib/claims";
 import { deterministicNonce } from "../lib/nonce";
-import { addRewardClaim, markRewardRowsClaimed, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
+import { addRewardClaim, markRewardRowsClaimed, markRewardRowsSigned, sumRewardRows, type RewardClaimRow } from "../lib/reward-claims";
 import { recordAiPackageOrder } from "../lib/ai-orders";
 import { decimalToWei, hsWeiToUsdtWei, stockWeiToUsdtWei, usdtWeiToHsWei } from "../lib/pricing";
 import { readTokenBalance } from "../lib/token-balance";
@@ -467,8 +467,10 @@ ai.post("/referral/claim", async (c) => {
   const user = await requireUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
 
+  // 只取尚未绑定签名批次的行：已绑定的批次由同一 nonce 的签名（或系统补发）负责到账，
+  // 不会被重复打包 → 不同 nonce 之间永远不共享账本行，杜绝双发。
   const refs = await c.env.DB.prepare(
-    "SELECT id, reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0 AND reward_token = 'USDT'",
+    "SELECT id, reward_amount FROM referral_rewards WHERE user = ? AND claimed = 0 AND reward_token = 'USDT' AND claim_nonce IS NULL",
   )
     .bind(user)
     .all<{ id: string; reward_amount: string }>();
@@ -476,7 +478,9 @@ ai.post("/referral/claim", async (c) => {
   for (const row of refs.results ?? []) total += BigInt(row.reward_amount);
   if (total <= 0n) return c.json({ amount: "0" });
 
-  const nonce = deterministicNonce("ai-ref", user);
+  // 按批确定性 nonce（同一批行永远同一 nonce，可安全重签；新批次自动换 nonce）
+  const batchIds = (refs.results ?? []).map((row) => row.id).sort();
+  const nonce = deterministicNonce("ai-ref", `${user}:${batchIds.join("|")}`);
   const now = await nowSeconds(c.env);
 
   const existing = await getExistingSignature(c.env, nonce, now);
@@ -490,9 +494,13 @@ ai.post("/referral/claim", async (c) => {
     nonce,
   });
 
-  await c.env.DB.prepare("UPDATE referral_rewards SET claimed = 1, claim_nonce = ? WHERE user = ? AND claimed = 0 AND reward_token = 'USDT'")
-    .bind(claim.nonce, user)
-    .run();
+  // 只绑定批次（按行 id 逐条锁，避免圈进签名之后新到的行），不乐观标记 claimed；
+  // claimed=1 由 indexer 在链上成交后按 nonce 回写
+  for (const row of refs.results ?? []) {
+    await c.env.DB.prepare("UPDATE referral_rewards SET claim_nonce = ? WHERE id = ? AND claimed = 0 AND claim_nonce IS NULL")
+      .bind(claim.nonce, row.id)
+      .run();
+  }
   return c.json({ ...claim, rows: refs.results?.length ?? 0 });
 });
 
@@ -542,10 +550,11 @@ ai.post("/airdrop/claim", async (c) => {
     });
   }
 
+  // 只取未绑定签名批次的行（同 /ai/referral/claim：批与批之间不共享账本行，杜绝双发）
   const rows = await c.env.DB.prepare(
     `SELECT id, user, kind, reward_token, reward_amount, round, source_ref
        FROM reward_claims
-      WHERE user = ? AND claimed = 0 AND reward_token = 'HS'
+      WHERE user = ? AND claimed = 0 AND reward_token = 'HS' AND claim_nonce IS NULL
         AND (
           (kind = 'ai-base-airdrop' AND source_ref = ?)
           OR (kind = 'ai-burn-airdrop' AND created_at < ?)
@@ -556,7 +565,9 @@ ai.post("/airdrop/claim", async (c) => {
   const total = sumRewardRows(rows.results ?? []);
   if (total <= 0n) return c.json({ token: null, amount: "0", note: "no claimable" });
 
-  const nonce = deterministicNonce("ai-airdrop", user);
+  // 按批确定性 nonce；旧实现用每用户固定 nonce，第二次领取会撞上已消费的 nonce 永远失败
+  const batchIds = (rows.results ?? []).map((row) => row.id).sort();
+  const nonce = deterministicNonce("ai-airdrop", `${user}:${batchIds.join("|")}`);
 
   const existing = await getExistingSignature(c.env, nonce, now);
   if (existing) return c.json({ ...existing, rows: rows.results?.length ?? 0 });
@@ -568,6 +579,7 @@ ai.post("/airdrop/claim", async (c) => {
     reason: 6,
     nonce,
   });
-  await markRewardRowsClaimed(c.env, rows.results ?? [], claim.nonce);
+  // 只绑定批次，不乐观标记；claimed=1 由 indexer 链上成交后按 nonce 回写
+  await markRewardRowsSigned(c.env, rows.results ?? [], claim.nonce);
   return c.json({ ...claim, rows: rows.results?.length ?? 0 });
 });
