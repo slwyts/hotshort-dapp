@@ -19,11 +19,13 @@ import {
   getVaultAddress,
   latestBlockTimestamp,
   publicClient,
+  rpcCall,
   resetE2eState,
   runTestCron,
   setTestConfig,
   setTestLotteryWinning,
   signIn,
+  transferToken,
   type VaultClaim,
 } from "./helpers";
 
@@ -109,6 +111,7 @@ type BurnMeResponse = {
   burnPendingUsdt: string;
   pendingBreakdown?: {
     promotionUsdt: string;
+    lpDividendUsdt?: string;
   };
   eligibleAirdrop: boolean;
 };
@@ -320,6 +323,81 @@ test.describe("README rule lifecycle scripts", () => {
       await claimFromVault(ALICE, claim);
       await expectNonceConsumed(claim);
     }
+  });
+
+  test("LP dividend only accepts trusted-wallet USDT transfers and distributes them once", async () => {
+    const vault = await resetAndFund([ALICE, BOB, DEPLOYER]);
+    const adminJwt = await signIn(DEPLOYER);
+    const aliceJwt = await signIn(ALICE);
+    const bobJwt = await signIn(BOB);
+
+    const rootCode = await getReferralCode(adminJwt);
+    await bindByReferralCode(aliceJwt, rootCode);
+    await bindByReferralCode(bobJwt, rootCode);
+    await recordBurn({ account: ALICE, jwt: aliceJwt, amount: parseEther("1000") });
+    await recordBurn({ account: BOB, jwt: bobJwt, amount: parseEther("1000") });
+
+    // 忽略测试账户初始化产生的旧转账，只观察下方两笔新交易。
+    await setTestConfig("indexer_last_block", (await publicClient.getBlockNumber()).toString());
+    await transferToken(ALICE, USDT_TOKEN as Address, vault, parseEther("20"));
+    const trustedAmount = parseEther("125");
+    const trustedTxHash = await transferToken(DEPLOYER, USDT_TOKEN as Address, vault, trustedAmount);
+
+    const indexed = await runTestCron<{ from: string; to: string; count: number }>("indexer");
+    expect(indexed.result.count).toBeGreaterThan(0);
+
+    type LpAdminResponse = {
+      sourceAddress: string;
+      pendingUsdtWei: string;
+      recentReceipts: {
+        tx_hash: string;
+        log_index: number;
+        amount_usdt: string;
+        settled_round: number | null;
+      }[];
+    };
+    const beforeDistribution = await apiRequest<LpAdminResponse>("/admin/lp-dividend", {
+      headers: bearer(adminJwt),
+    });
+    expect(beforeDistribution.sourceAddress).toBe(DEPLOYER.address.toLowerCase());
+    expect(beforeDistribution.pendingUsdtWei).toBe(trustedAmount.toString());
+    expect(beforeDistribution.recentReceipts).toHaveLength(1);
+    expect(beforeDistribution.recentReceipts[0]).toMatchObject({
+      tx_hash: trustedTxHash,
+      amount_usdt: trustedAmount.toString(),
+      settled_round: null,
+    });
+
+    // 多挖一个空块后会重扫上一游标块；同一日志仍不会重复入账。
+    await rpcCall("evm_mine");
+    await runTestCron("indexer");
+    const afterReplay = await apiRequest<LpAdminResponse>("/admin/lp-dividend", { headers: bearer(adminJwt) });
+    expect(afterReplay.pendingUsdtWei).toBe(trustedAmount.toString());
+    expect(afterReplay.recentReceipts).toHaveLength(1);
+
+    const distributed = await runTestCron<{
+      round: number;
+      amountUsdt: string;
+      recipients: number;
+      skipped: boolean;
+      pendingUsdt: string;
+    }>("lp-dividend");
+    expect(distributed.result).toMatchObject({
+      round: 1,
+      amountUsdt: trustedAmount.toString(),
+      recipients: 4,
+      skipped: false,
+      pendingUsdt: "0",
+    });
+
+    const expectedPerUser = trustedAmount / 2n;
+    const aliceBurn = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(aliceJwt) });
+    const bobBurn = await apiRequest<BurnMeResponse>("/burn/me", { headers: bearer(bobJwt) });
+    expect(BigInt(aliceBurn.pendingBreakdown?.lpDividendUsdt ?? "0")).toBe(expectedPerUser);
+    expect(BigInt(bobBurn.pendingBreakdown?.lpDividendUsdt ?? "0")).toBe(expectedPerUser);
+
+    const noReplay = await runTestCron<{ skipped: boolean; pendingUsdt: string }>("lp-dividend");
+    expect(noReplay.result).toMatchObject({ skipped: true, pendingUsdt: "0" });
   });
 
   test("AI package, referral, daily dividend, HS airdrop, and HS-to-stock swap lifecycle", async () => {

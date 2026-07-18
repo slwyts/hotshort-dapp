@@ -26,6 +26,15 @@ interface PendingRow {
   pending: number | string;
 }
 
+interface LpDividendReceipt {
+  tx_hash: string;
+  log_index: number;
+  amount_usdt: string;
+  block_number: string;
+  received_at: number;
+  settled_round: number | null;
+}
+
 export default function AdminFundsPage() {
   const { isConnected, address } = useAccount();
   const { jwt, signIn } = useSiweJwt();
@@ -38,6 +47,8 @@ export default function AdminFundsPage() {
   const [lpPendingUsdtWei, setLpPendingUsdtWei] = useState("0");
   const [lpLastAt, setLpLastAt] = useState(0);
   const [lpRound, setLpRound] = useState(0);
+  const [lpSourceAddress, setLpSourceAddress] = useState("");
+  const [lpRecentReceipts, setLpRecentReceipts] = useState<LpDividendReceipt[]>([]);
   const [lpSaving, setLpSaving] = useState(false);
   const [lpTriggering, setLpTriggering] = useState(false);
   const { vault, hsToken, usdtToken, pancakePair } = useContracts();
@@ -96,11 +107,20 @@ export default function AdminFundsPage() {
     const token = jwt ?? (await signIn());
     if (!token) return;
     try {
-      const r = await api.get<{ thresholdUsdt: string; pendingUsdtWei: string; lastAt: number; round: number }>(endpoints.adminLpDividend, token);
+      const r = await api.get<{
+        thresholdUsdt: string;
+        pendingUsdtWei: string;
+        lastAt: number;
+        round: number;
+        sourceAddress: string;
+        recentReceipts: LpDividendReceipt[];
+      }>(endpoints.adminLpDividend, token);
       setLpThreshold(r.thresholdUsdt);
       setLpPendingUsdtWei(r.pendingUsdtWei);
       setLpRound(r.round);
       setLpLastAt(r.lastAt);
+      setLpSourceAddress(r.sourceAddress);
+      setLpRecentReceipts(r.recentReceipts ?? []);
     } catch { /* ignore */ }
   }, [jwt, signIn]);
 
@@ -348,9 +368,17 @@ export default function AdminFundsPage() {
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Coins className="h-5 w-5 text-[#f59e0b]" /> LP 交易分红
               </CardTitle>
-              <p className="text-xs text-white/40">监听 HS 合约打入 Vault 的 USDT 分红，累计达到阈值后按 70%/30% 分给所有燃烧者和 Top10。</p>
+              <p className="text-xs text-white/40">项目方将 HS 交易产生的 LP USDT 分红转入资金池，累计达到阈值后按 70%/30% 分给所有燃烧者和 Top10。</p>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="rounded-xl border border-[#f59e0b]/15 bg-[#f59e0b]/5 p-3">
+                <div className="text-[10px] text-white/40">LP USDT 分红资金来源地址</div>
+                <div className="mt-1 font-mono text-xs text-[#f59e0b]" title={lpSourceAddress}>
+                  {lpSourceAddress ? shortenAddress(lpSourceAddress, 8) : "—"}
+                </div>
+                <div className="mt-1 text-[10px] text-white/35">系统仅将该地址转入资金池的 USDT 计入 LP 分红。</div>
+              </div>
+
               <div className="flex items-center gap-2">
                 <span className="text-xs text-white/50 shrink-0">触发阈值</span>
                 <input
@@ -380,6 +408,24 @@ export default function AdminFundsPage() {
                   <div className="text-[10px] text-white/40">已分发轮次</div>
                   <div className="text-xs font-mono text-white">{lpRound}</div>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-[10px] uppercase tracking-widest text-white/40">最近入账</div>
+                {lpRecentReceipts.length === 0 ? (
+                  <div className="rounded-lg border border-white/5 bg-black/30 px-3 py-2 text-xs text-white/35">暂无入账</div>
+                ) : lpRecentReceipts.map((receipt) => (
+                  <div key={`${receipt.tx_hash}-${receipt.log_index}`} className="flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-black/30 px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="font-mono text-[11px] text-white" title={receipt.tx_hash}>{shortenAddress(receipt.tx_hash, 6)}</div>
+                      <div className="text-[10px] text-white/35">区块 {receipt.block_number} · {new Date(receipt.received_at * 1000).toLocaleString("zh-CN")}</div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="font-mono text-xs text-[#f59e0b]">{formatNumber(Number(formatUnits(BigInt(receipt.amount_usdt), 18)), 4)} USDT</div>
+                      <div className="text-[10px] text-white/35">{receipt.settled_round === null ? "待结算" : `第 ${receipt.settled_round} 轮`}</div>
+                    </div>
+                  </div>
+                ))}
               </div>
 
               {/* 操作按钮 */}

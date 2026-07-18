@@ -810,7 +810,29 @@ admin.get("/lp-dividend", async (c) => {
   let pendingUsdtWei = 0n;
   for (const row of receipts.results ?? []) pendingUsdtWei += BigInt(row.amount_usdt);
 
-  return c.json({ thresholdUsdt, pendingUsdtWei: pendingUsdtWei.toString(), lastAt, round });
+  const recentReceipts = await c.env.DB.prepare(
+    `SELECT tx_hash, log_index, amount_usdt, block_number, received_at, settled_round
+       FROM lp_tax_receipts
+      ORDER BY received_at DESC, block_number DESC, log_index DESC
+      LIMIT 5`,
+  ).all<{
+    tx_hash: string;
+    log_index: number;
+    amount_usdt: string;
+    block_number: string;
+    received_at: number;
+    settled_round: number | null;
+  }>();
+
+  return c.json({
+    thresholdUsdt,
+    pendingUsdtWei: pendingUsdtWei.toString(),
+    lastAt,
+    round,
+    sourceAddress: c.env.LP_DIVIDEND_SOURCE_ADDRESS.toLowerCase(),
+    vaultAddress: c.env.VAULT_ADDRESS.toLowerCase(),
+    recentReceipts: recentReceipts.results ?? [],
+  });
 });
 
 /** POST /admin/lp-dividend  设置 LP 分红配置 */

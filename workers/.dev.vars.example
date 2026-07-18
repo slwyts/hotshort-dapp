@@ -3,3 +3,7 @@ JWT_SECRET = "dev-secret-change-me"
 # 可选：BscScan API key。仅 admin/genesis 页"链上扫描备选路径"按钮会用到；
 # 创世节点名单的主路径是 CSV 上传，不需要这个 key。
 BSCSCAN_API_KEY = ""
+
+# 非敏感运行参数。本地脚本会自动写入；手动启动 Worker 时按环境调整。
+LP_DIVIDEND_SOURCE_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+INDEXER_CONFIRMATIONS = "0"

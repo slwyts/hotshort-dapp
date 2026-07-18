@@ -113,18 +113,23 @@ export async function setTokenBalance(token: Address, holder: Address, balance: 
 
 async function transferTokenFromDeployer(token: Address, to: Address, amount: bigint): Promise<boolean> {
   try {
-    const { walletClient } = accountClient(DEPLOYER);
-    const hash = await walletClient.writeContract({
-      address: token.toLowerCase() as Address,
-      abi: ERC20_ABI,
-      functionName: "transfer",
-      args: [to, amount],
-    });
-    await publicClient.waitForTransactionReceipt({ hash });
+    await transferToken(DEPLOYER, token, to, amount);
     return true;
   } catch {
     return false;
   }
+}
+
+export async function transferToken(accountInfo: TestAccount, token: Address, to: Address, amount: bigint): Promise<Hex> {
+  const { walletClient } = accountClient(accountInfo);
+  const hash = await walletClient.writeContract({
+    address: token.toLowerCase() as Address,
+    abi: ERC20_ABI,
+    functionName: "transfer",
+    args: [to, amount],
+  });
+  await publicClient.waitForTransactionReceipt({ hash });
+  return hash;
 }
 
 async function fundErc20(token: Address, holder: Address, amount: bigint, fallbackBalanceSlot: bigint): Promise<void> {

@@ -16,16 +16,31 @@ const TRANSFER_EVENT = parseAbiItem(
 );
 
 const CURSOR_KEY = "indexer_last_block";
+const MAX_BLOCK_RANGE = 2_000n;
+const INITIAL_LOOKBACK_BLOCKS = 50_000n;
+
+function configuredAddress(value: string | undefined, label: string): Address {
+  const normalized = (value ?? "").toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(normalized) || normalized === "0x0000000000000000000000000000000000000000") {
+    throw new Error(`invalid ${label}`);
+  }
+  return normalized as Address;
+}
+
+function confirmationDepth(env: Env): bigint {
+  const text = env.INDEXER_CONFIRMATIONS?.trim() ?? "12";
+  if (!/^\d+$/.test(text)) throw new Error("invalid INDEXER_CONFIRMATIONS");
+  return BigInt(text);
+}
 
 /**
  * 每分钟 cron 触发：从上次游标向链上拉 Vault 事件，写入 D1。
  * P0 仅落地基础事件追踪，P1+ 各业务用游标确认订单状态。
  */
 export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: bigint; count: number }> {
-  const vault = env.VAULT_ADDRESS as Address;
-  if (!/^0x[a-fA-F0-9]{40}$/.test(vault) || vault === "0x0000000000000000000000000000000000000000") {
-    return { from: 0n, to: 0n, count: 0 };
-  }
+  const vault = configuredAddress(env.VAULT_ADDRESS, "VAULT_ADDRESS");
+  const lpDividendSource = configuredAddress(env.LP_DIVIDEND_SOURCE_ADDRESS, "LP_DIVIDEND_SOURCE_ADDRESS");
+  const usdtToken = configuredAddress(env.USDT_TOKEN, "USDT_TOKEN");
 
   const client = createPublicClient({ transport: http(env.RPC_URL) });
 
@@ -35,13 +50,15 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
   let from = cursorRow ? BigInt(cursorRow.value) : 0n;
 
   const tip = await client.getBlockNumber();
-  // 一次最多扫 2000 块，避免单次 cron 超时
-  const to = from + 2000n > tip ? tip : from + 2000n;
-  if (from === 0n) from = tip > 50_000n ? tip - 50_000n : 0n;
+  const confirmations = confirmationDepth(env);
+  const confirmedTip = tip > confirmations ? tip - confirmations : 0n;
+
+  // 新库从已确认链头前 5 万块开始；先确定起点，再计算本批终点。
+  if (from === 0n) from = confirmedTip > INITIAL_LOOKBACK_BLOCKS ? confirmedTip - INITIAL_LOOKBACK_BLOCKS : 0n;
+  // 一次最多扫 2000 块，避免单次 cron 超时。
+  const to = from + MAX_BLOCK_RANGE > confirmedTip ? confirmedTip : from + MAX_BLOCK_RANGE;
   if (from >= to) return { from, to, count: 0 };
 
-  const hsToken = env.HS_TOKEN.toLowerCase() as Address;
-  const usdtToken = env.USDT_TOKEN.toLowerCase() as Address;
   const [deposited, claimed, burned, lpTaxTransfers] = await Promise.all([
     client.getLogs({ address: vault, event: DEPOSITED_EVENT, fromBlock: from, toBlock: to }),
     client.getLogs({ address: vault, event: CLAIMED_EVENT, fromBlock: from, toBlock: to }),
@@ -49,7 +66,7 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
     client.getLogs({
       address: usdtToken,
       event: TRANSFER_EVENT,
-      args: { from: hsToken, to: vault },
+      args: { from: lpDividendSource, to: vault },
       fromBlock: from,
       toBlock: to,
     }),
@@ -192,7 +209,8 @@ export async function syncVaultEvents(env: Env): Promise<{ from: bigint; to: big
       .run();
   }
 
-  // HS token 的 LP 持有人分红会以 USDT Transfer(HS_TOKEN -> Vault) 形式进入 Vault。
+  // HS 旧合约先把 LP 分红发给已登记的项目方 LP 钱包；该钱包转入 Vault 的
+  // USDT Transfer(LP_DIVIDEND_SOURCE_ADDRESS -> VAULT_ADDRESS) 才计作 §4.1 LP 分红。
   for (const log of lpTaxTransfers) {
     const value = log.args.value;
     if (!value || value <= 0n) continue;

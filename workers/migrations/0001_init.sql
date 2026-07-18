@@ -310,7 +310,7 @@ CREATE TABLE IF NOT EXISTS reward_claims (
 CREATE INDEX IF NOT EXISTS idx_reward_claims_user ON reward_claims(user, claimed);
 CREATE INDEX IF NOT EXISTS idx_reward_claims_round ON reward_claims(round, kind);
 
--- HS 合约向 Vault 发放的 LP 持有人 USDT 分红入账
+-- HS 旧合约登记的项目方 LP 钱包向 Vault 转入的 USDT 分红入账
 CREATE TABLE IF NOT EXISTS lp_tax_receipts (
   id TEXT PRIMARY KEY,
   tx_hash TEXT NOT NULL,

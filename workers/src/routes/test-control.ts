@@ -7,6 +7,7 @@ import { syncStockQuote } from "../lib/stocks";
 import { drawLottery } from "../lib/lottery-draw";
 import { settleBurnRound } from "../lib/burn-settle";
 import { distributeBurnRealtime } from "../lib/burn-realtime";
+import { distributeLpDividend } from "../lib/lp-dividend";
 import { advanceTestNowSeconds, isTestMode, nowSeconds, setTestNowSeconds } from "../lib/time";
 import {
   STAKE_ASSETS,
@@ -41,6 +42,7 @@ const RESET_TABLES = [
   "burn_rounds",
   "burn_records",
   "lp_tax_receipts",
+  "reward_claims",
   "airdrop_list",
   "genesis_nodes",
   "referral_paths",
@@ -146,8 +148,13 @@ testControl.post("/lottery/winning", async (c) => {
 testControl.post("/cron", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { job?: string };
   switch (body.job) {
-    case "indexer":
-      return c.json({ job: body.job, result: await syncVaultEvents(c.env) });
+    case "indexer": {
+      const result = await syncVaultEvents(c.env);
+      return c.json({
+        job: body.job,
+        result: { ...result, from: result.from.toString(), to: result.to.toString() },
+      });
+    }
     case "ai-dividend":
       return c.json({ job: body.job, result: await settleAiDividend(c.env) });
     case "ai-release":
@@ -160,6 +167,8 @@ testControl.post("/cron", async (c) => {
       return c.json({ job: body.job, result: await distributeBurnRealtime(c.env) });
     case "burn-weekly":
       return c.json({ job: body.job, result: await settleBurnRound(c.env) });
+    case "lp-dividend":
+      return c.json({ job: body.job, result: await distributeLpDividend(c.env) });
     case "weekly": {
       const lottery = await drawLottery(c.env);
       const burn = await settleBurnRound(c.env);
