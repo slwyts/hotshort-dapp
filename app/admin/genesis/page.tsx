@@ -18,9 +18,10 @@ interface ParsedRow {
 }
 
 interface GenesisNode {
+  record_id: string;
   address: string;
   tier: Tier;
-  source: "csv" | "onchain-scan" | string;
+  source: "csv" | "onchain-scan" | "dapp" | string;
   imported_at: number;
   imported_by: string;
   referrer: string | null;
@@ -278,15 +279,14 @@ export default function AdminGenesisPage() {
                       <th className="px-3 py-2 font-medium">等级</th>
                       <th className="px-3 py-2 font-medium">推荐人</th>
                       <th className="px-3 py-2 font-medium">权益订单</th>
-                      <th className="px-3 py-2 font-medium">来源</th>
-                      <th className="px-3 py-2 text-right font-medium">导入时间</th>
+                      <th className="px-3 py-2 text-right font-medium">购买/导入时间</th>
                     </tr>
                   </thead>
                   <tbody>
                     {nodes.map((node) => {
                       const stock = weiToNumber(node.stock_granted);
                       return (
-                        <tr key={node.address} className="border-b border-white/5 hover:bg-white/[0.03]">
+                        <tr key={node.record_id} className="border-b border-white/5 hover:bg-white/[0.03]">
                           <td className="px-3 py-3 font-mono text-white/75">{shortenAddress(node.address, 6)}</td>
                           <td className="px-3 py-3">
                             <span className="rounded-md border border-[#00c6ff]/20 bg-[#00c6ff]/10 px-2 py-1 text-[#00c6ff]">
@@ -306,7 +306,6 @@ export default function AdminGenesisPage() {
                               {node.order_id ? `已创建 · ${formatNumber(stock, 2)} 股` : "未创建"}
                             </span>
                           </td>
-                          <td className="px-3 py-3 text-white/50">{node.source === "onchain-scan" ? "链上扫描" : "CSV"}</td>
                           <td className="px-3 py-3 text-right text-white/45">{dateText(node.imported_at)}</td>
                         </tr>
                       );

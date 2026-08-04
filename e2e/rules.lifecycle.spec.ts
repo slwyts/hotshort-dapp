@@ -446,6 +446,15 @@ test.describe("README rule lifecycle scripts", () => {
     expect(BigInt(bobBuy.stockGranted)).toBe(parseEther("400"));
     expect(BigInt(charlieBuy.stockGranted)).toBe(parseEther("100"));
 
+    const genesisNodes = await apiRequest<{
+      items: { record_id: string; address: string; tier: string; source: string; order_id: string | null }[];
+    }>("/admin/genesis-nodes", { headers: bearer(adminJwt) });
+    expect(genesisNodes.items.find((item) => item.order_id === aliceBuy.id)).toMatchObject({
+      address: ALICE.address.toLowerCase(),
+      tier: "genesis",
+      source: "dapp",
+    });
+
     const aliceOrdersAfterBuy = await apiRequest<{ orders: AiOrderResponse[] }>("/ai/orders", { headers: bearer(aliceJwt) });
     const alicePackageOrder = aliceOrdersAfterBuy.orders.find((order) => order.id === aliceBuy.id);
     expect(alicePackageOrder?.releases).toHaveLength(8);

@@ -116,7 +116,7 @@ admin.post("/rates", async (c) => {
   return c.json({ updated });
 });
 
-/** GET /admin/genesis-nodes  当前创世节点名单 */
+/** GET /admin/genesis-nodes  当前节点名单（导入记录 + DApp 直购订单） */
 admin.get("/genesis-nodes", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
@@ -124,20 +124,42 @@ admin.get("/genesis-nodes", async (c) => {
   const limitParam = Number(c.req.query("limit") ?? 200);
   const limit = Number.isInteger(limitParam) ? Math.min(Math.max(limitParam, 1), 500) : 200;
   const rs = await c.env.DB.prepare(
-    `SELECT
-        g.address,
-        g.tier,
-        g.source,
-        g.imported_at,
-        g.imported_by,
-        u.referrer,
-        o.id AS order_id,
-        o.usdt_in,
-        o.stock_granted
+    `WITH combined AS (
+       SELECT
+         'import:' || g.address AS record_id,
+         g.address,
+         g.tier,
+         g.source,
+         g.imported_at,
+         g.imported_by,
+         u.referrer,
+         o.id AS order_id,
+         o.usdt_in,
+         o.stock_granted
        FROM genesis_nodes g
        LEFT JOIN users u ON u.address = g.address
        LEFT JOIN ai_orders o ON o.source_tx_hash = 'genesis-import:' || g.address || ':' || g.tier
-      ORDER BY g.imported_at DESC, g.address ASC
+
+       UNION ALL
+
+       SELECT
+         'dapp:' || o.id AS record_id,
+         o.user AS address,
+         o.tier,
+         'dapp' AS source,
+         o.created_at AS imported_at,
+         '' AS imported_by,
+         u.referrer,
+         o.id AS order_id,
+         o.usdt_in,
+         o.stock_granted
+       FROM ai_orders o
+       LEFT JOIN users u ON u.address = o.user
+       WHERE o.source_tx_hash LIKE '0x%'
+         AND length(o.source_tx_hash) = 66
+     )
+     SELECT * FROM combined
+      ORDER BY imported_at DESC, address ASC
       LIMIT ?`,
   )
     .bind(limit)
