@@ -15,7 +15,7 @@ import {
 
 const sections = [
   { href: "/admin/rates", icon: Settings, title: "收益率管理", desc: "设置各资产的月化收益率" },
-  { href: "/admin/genesis", icon: Database, title: "创世节点", desc: "导入和管理创世用户名单" },
+  { href: "/admin/genesis", icon: Database, title: "节点名单", desc: "按套餐等级查看和导入参与钱包" },
   { href: "/admin/stock-price", icon: Coins, title: "股价管理", desc: "自动同步与手动兜底价格" },
   { href: "/admin/ai-config", icon: BarChart3, title: "AI 量化", desc: "每日交易模拟与分红池配置" },
   { href: "/admin/agents", icon: Users, title: "代理商", desc: "团队数据与返佣统计" },

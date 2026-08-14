@@ -116,56 +116,114 @@ admin.post("/rates", async (c) => {
   return c.json({ updated });
 });
 
-/** GET /admin/genesis-nodes  当前节点名单（导入记录 + DApp 直购订单） */
+interface GenesisNodeCountRow {
+  tier: AiTierKey;
+  user_count: number;
+  order_count: number;
+}
+
+interface GenesisNodeParticipantRow {
+  record_id: string;
+  address: string;
+  tier: AiTierKey;
+  referrer: string | null;
+  order_count: number;
+  latest_at: number;
+}
+
+const GENESIS_PARTICIPANTS_CTE = `WITH participant_rows AS (
+  SELECT o.user AS address, o.tier, o.created_at AS activity_at, 1 AS order_count
+  FROM ai_orders o
+
+  UNION ALL
+
+  SELECT g.address AS address, g.tier, g.imported_at AS activity_at, 0 AS order_count
+  FROM genesis_nodes g
+  WHERE NOT EXISTS (
+    SELECT 1 FROM ai_orders o
+    WHERE o.user = g.address AND o.tier = g.tier
+  )
+), participants AS (
+  SELECT address, tier, SUM(order_count) AS order_count, MAX(activity_at) AS latest_at
+  FROM participant_rows
+  GROUP BY address, tier
+), filtered AS (
+  SELECT
+    'participant:' || p.tier || ':' || p.address AS record_id,
+    p.address,
+    p.tier,
+    u.referrer,
+    p.order_count,
+    p.latest_at
+  FROM participants p
+  LEFT JOIN users u ON u.address = p.address
+  WHERE (? = '' OR p.address LIKE ?)
+)`;
+
+/** GET /admin/genesis-nodes  按套餐等级和钱包聚合的节点名单 */
 admin.get("/genesis-nodes", async (c) => {
   const owner = await requireOwner(c);
   if (!owner) return c.json({ error: "forbidden" }, 403);
 
-  const limitParam = Number(c.req.query("limit") ?? 200);
-  const limit = Number.isInteger(limitParam) ? Math.min(Math.max(limitParam, 1), 500) : 200;
-  const rs = await c.env.DB.prepare(
-    `WITH combined AS (
-       SELECT
-         'import:' || g.address AS record_id,
-         g.address,
-         g.tier,
-         g.source,
-         g.imported_at,
-         g.imported_by,
-         u.referrer,
-         o.id AS order_id,
-         o.usdt_in,
-         o.stock_granted
-       FROM genesis_nodes g
-       LEFT JOIN users u ON u.address = g.address
-       LEFT JOIN ai_orders o ON o.source_tx_hash = 'genesis-import:' || g.address || ':' || g.tier
+  const tierParam = c.req.query("tier")?.trim() ?? "";
+  const tier = tierParam ? normalizeAiTier(tierParam) : null;
+  if (tierParam && !tier) return c.json({ error: "bad tier" }, 400);
 
-       UNION ALL
+  const limitParam = Number(c.req.query("limit") ?? 10);
+  const offsetParam = Number(c.req.query("offset") ?? 0);
+  const limit = Number.isInteger(limitParam) ? Math.min(Math.max(limitParam, 1), 50) : 10;
+  const offset = Number.isInteger(offsetParam) ? Math.max(offsetParam, 0) : 0;
+  const q = (c.req.query("q") ?? "").toLowerCase().replace(/[^0-9a-fx]/g, "").slice(0, 42);
+  const addressPattern = `%${q}%`;
 
-       SELECT
-         'dapp:' || o.id AS record_id,
-         o.user AS address,
-         o.tier,
-         'dapp' AS source,
-         o.created_at AS imported_at,
-         '' AS imported_by,
-         u.referrer,
-         o.id AS order_id,
-         o.usdt_in,
-         o.stock_granted
-       FROM ai_orders o
-       LEFT JOIN users u ON u.address = o.user
-       WHERE o.source_tx_hash LIKE '0x%'
-         AND length(o.source_tx_hash) = 66
-     )
-     SELECT * FROM combined
-      ORDER BY imported_at DESC, address ASC
-      LIMIT ?`,
+  const countsResult = await c.env.DB.prepare(
+    `${GENESIS_PARTICIPANTS_CTE}
+     SELECT tier, COUNT(*) AS user_count, SUM(order_count) AS order_count
+     FROM filtered
+     GROUP BY tier`,
   )
-    .bind(limit)
-    .all();
+    .bind(q, addressPattern)
+    .all<GenesisNodeCountRow>();
 
-  return c.json({ items: rs.results ?? [] });
+  let itemsResult: D1Result<GenesisNodeParticipantRow>;
+  if (tier) {
+    itemsResult = await c.env.DB.prepare(
+      `${GENESIS_PARTICIPANTS_CTE}
+       SELECT record_id, address, tier, referrer, order_count, latest_at
+       FROM filtered
+       WHERE tier = ?
+       ORDER BY latest_at DESC, address ASC
+       LIMIT ? OFFSET ?`,
+    )
+      .bind(q, addressPattern, tier, limit, offset)
+      .all<GenesisNodeParticipantRow>();
+  } else {
+    itemsResult = await c.env.DB.prepare(
+      `${GENESIS_PARTICIPANTS_CTE}, ranked AS (
+         SELECT *, ROW_NUMBER() OVER (PARTITION BY tier ORDER BY latest_at DESC, address ASC) AS row_number
+         FROM filtered
+       )
+       SELECT record_id, address, tier, referrer, order_count, latest_at
+       FROM ranked
+       WHERE row_number <= ?
+       ORDER BY CASE tier
+         WHEN 'genesis' THEN 1
+         WHEN 'glory' THEN 2
+         WHEN 'eternal' THEN 3
+         WHEN 'shine' THEN 4
+         WHEN 'pioneer' THEN 5
+         ELSE 6
+       END, latest_at DESC, address ASC`,
+    )
+      .bind(q, addressPattern, limit)
+      .all<GenesisNodeParticipantRow>();
+  }
+
+  return c.json({
+    counts: countsResult.results ?? [],
+    items: itemsResult.results ?? [],
+    page: { tier, offset: tier ? offset : 0, limit },
+  });
 });
 
 /** POST /admin/genesis-import  CSV 解析后批量入库 */
